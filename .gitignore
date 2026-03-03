@@ -1,29 +1,8 @@
-# Dependencies
 node_modules/
-
-# Environment
 .env
 .env.local
-.env.*.local
-
-# Logs
-*.log
-npm-debug.log*
-
-# Prisma
-prisma/migrations/
-
-# Build / Output
+.env.production
 dist/
-build/
-*.tsbuildinfo
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
+*.log
 .DS_Store
-Thumbs.db
+prisma/migrations/

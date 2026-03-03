@@ -1,371 +1,254 @@
-// ============================================
-// Firecrawl Scraping Service
-// Handles all web scraping operations:
-// - Keyword search
-// - Competitor crawling
-// - Rank tracking
-// - Content research
-// ============================================
+/**
+ * Firecrawl Service — wraps all /v2 endpoints
+ *
+ * Endpoints used:
+ *   POST /v2/scrape         — single URL → markdown, html, json, screenshot, branding, changeTracking, summary, images, links
+ *   POST /v2/search         — web search with sources (web, news, images), categories (github, research), tbs time filters
+ *   POST /v2/crawl          — recursive site crawl with depth, includes/excludes, changeTracking
+ *   POST /v2/map            — fast URL discovery from sitemap + SERP + cache
+ *   POST /v2/batch/scrape   — parallel URL scraping with maxConcurrency + webhooks
+ *   POST /v2/agent          — autonomous AI research with Spark 1 Mini/Pro models
+ *
+ * Key formats for SEO:
+ *   "markdown"       — clean content
+ *   "html"           — raw HTML
+ *   "links"          — all links on page
+ *   "screenshot"     — PNG capture (fullPage, quality, viewport options)
+ *   "json"           — structured extraction with schema or prompt (costs +4 credits)
+ *   "changeTracking" — diff against previous scrape (modes: "git-diff", "json")
+ *   "branding"       — colors, fonts, logo, typography
+ *   "summary"        — AI-generated page summary
+ *   "images"         — all image URLs
+ */
 
-const FIRECRAWL_BASE = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v2';
-const FIRECRAWL_KEY = process.env.FIRECRAWL_API_KEY;
+const BASE_URL = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v2';
+const API_KEY = process.env.FIRECRAWL_API_KEY;
 
-class FirecrawlService {
-  constructor() {
-    if (!FIRECRAWL_KEY) {
-      throw new Error('FIRECRAWL_API_KEY is required');
-    }
-    this.headers = {
-      'Authorization': `Bearer ${FIRECRAWL_KEY}`,
+async function firecrawlRequest(endpoint, body = {}, method = 'POST') {
+  const url = `${BASE_URL}${endpoint}`;
+  const options = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
       'Content-Type': 'application/json'
-    };
-    this.creditsUsed = 0;
-  }
-
-  // ============================================
-  // KEYWORD SEARCH
-  // Search for a keyword and get top results
-  // Cost: ~2 credits per 10 results
-  // ============================================
-  async searchKeyword(keyword, options = {}) {
-    const { limit = 10, location = null, language = 'en' } = options;
-    
-    try {
-      const body = {
-        query: keyword,
-        limit,
-        scrapeOptions: {
-          formats: ['markdown', 'links']
-        }
-      };
-
-      if (location) body.location = location;
-      if (language) body.lang = language;
-
-      const response = await fetch(`${FIRECRAWL_BASE}/search`, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(body)
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Firecrawl search failed: ${response.status} - ${error}`);
-      }
-
-      const data = await response.json();
-      this.creditsUsed += 2;
-
-      return {
-        success: true,
-        keyword,
-        results: (data.data?.web || data.data || []).map((r, i) => ({
-          position: i + 1,
-          url: r.url || '',
-          title: r.title || '',
-          description: r.description || '',
-          domain: r.url ? new URL(r.url).hostname.replace('www.', '') : '',
-          markdown: r.markdown?.substring(0, 500) || '' // First 500 chars for analysis
-        })),
-        totalResults: data.data?.web?.length || 0
-      };
-    } catch (error) {
-      console.error(`Search failed for "${keyword}":`, error.message);
-      return { success: false, keyword, error: error.message, results: [] };
     }
+  };
+  if (method !== 'GET') options.body = JSON.stringify(body);
+
+  const res = await fetch(url, options);
+  const data = await res.json();
+
+  if (!res.ok || data.success === false) {
+    const err = new Error(data.error || `Firecrawl ${endpoint} failed`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
   }
-
-  // ============================================
-  // BATCH KEYWORD SEARCH
-  // Search multiple keywords with rate limiting
-  // ============================================
-  async batchSearchKeywords(keywords, options = {}) {
-    const { concurrency = 3, delayMs = 1000 } = options;
-    const results = [];
-    
-    // Process in batches to respect rate limits
-    for (let i = 0; i < keywords.length; i += concurrency) {
-      const batch = keywords.slice(i, i + concurrency);
-      
-      const batchResults = await Promise.allSettled(
-        batch.map(kw => this.searchKeyword(
-          typeof kw === 'string' ? kw : kw.keyword,
-          options
-        ))
-      );
-
-      batchResults.forEach((result, idx) => {
-        if (result.status === 'fulfilled') {
-          results.push({
-            ...result.value,
-            segment: batch[idx].segment || 'core',
-            priority: batch[idx].priority || 2
-          });
-        } else {
-          results.push({
-            success: false,
-            keyword: batch[idx].keyword || batch[idx],
-            error: result.reason?.message || 'Unknown error',
-            results: []
-          });
-        }
-      });
-
-      // Rate limit delay between batches
-      if (i + concurrency < keywords.length) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
-    }
-
-    return results;
-  }
-
-  // ============================================
-  // COMPETITOR CRAWL
-  // Crawl a competitor's blog/content pages
-  // Cost: ~1 credit per page
-  // ============================================
-  async crawlCompetitor(domain, blogPath = '/blog', options = {}) {
-    const { limit = 20, depth = 2 } = options;
-    
-    try {
-      const response = await fetch(`${FIRECRAWL_BASE}/crawl`, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          url: `https://${domain}${blogPath}`,
-          limit,
-          maxDepth: depth,
-          scrapeOptions: {
-            formats: ['markdown'],
-            onlyMainContent: true
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Crawl failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      this.creditsUsed += limit;
-
-      // Firecrawl crawl is async - we get a job ID
-      if (data.id) {
-        return await this._pollCrawlResult(data.id);
-      }
-
-      return this._processCompetitorPages(domain, data.data || []);
-    } catch (error) {
-      console.error(`Crawl failed for ${domain}:`, error.message);
-      return { success: false, domain, error: error.message, pages: [] };
-    }
-  }
-
-  // Poll for async crawl results
-  async _pollCrawlResult(jobId, maxWaitMs = 120000) {
-    const startTime = Date.now();
-    
-    while (Date.now() - startTime < maxWaitMs) {
-      try {
-        const response = await fetch(`${FIRECRAWL_BASE}/crawl/${jobId}`, {
-          headers: this.headers
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'completed') {
-          return {
-            success: true,
-            pages: data.data || [],
-            totalPages: data.total || 0
-          };
-        }
-        
-        if (data.status === 'failed') {
-          throw new Error('Crawl job failed');
-        }
-        
-        // Wait 5 seconds before polling again
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      } catch (error) {
-        throw error;
-      }
-    }
-    
-    throw new Error('Crawl job timed out');
-  }
-
-  // Process crawled pages into structured data
-  _processCompetitorPages(domain, pages) {
-    const processed = pages.map(page => {
-      const markdown = page.markdown || '';
-      const metadata = page.metadata || {};
-
-      // Extract headings
-      const h1s = (markdown.match(/^# .+$/gm) || []).map(h => h.replace(/^# /, ''));
-      const h2s = (markdown.match(/^## .+$/gm) || []).map(h => h.replace(/^## /, ''));
-      const h3s = (markdown.match(/^### .+$/gm) || []).map(h => h.replace(/^### /, ''));
-
-      // Extract links
-      const links = (markdown.match(/\[([^\]]+)\]\(([^)]+)\)/g) || []).map(link => {
-        const match = link.match(/\[([^\]]+)\]\(([^)]+)\)/);
-        return match ? { text: match[1], url: match[2] } : null;
-      }).filter(Boolean);
-
-      const wordCount = markdown.split(/\s+/).length;
-
-      return {
-        url: metadata.sourceURL || page.url || '',
-        title: metadata.title || h1s[0] || 'Untitled',
-        description: metadata.description || '',
-        headings: { h1s, h2s, h3s },
-        wordCount,
-        readTimeMinutes: Math.ceil(wordCount / 200),
-        internalLinks: links.filter(l => l.url.includes(domain)).length,
-        externalLinks: links.filter(l => !l.url.includes(domain)).length,
-        hasImages: (markdown.match(/!\[/g) || []).length,
-        publishDate: metadata.publishedTime || null,
-        // Extract key topics from headings
-        topics: [...h1s, ...h2s].map(h => h.toLowerCase())
-      };
-    });
-
-    return {
-      success: true,
-      domain,
-      totalPages: processed.length,
-      avgWordCount: processed.length > 0
-        ? Math.round(processed.reduce((sum, p) => sum + p.wordCount, 0) / processed.length)
-        : 0,
-      pages: processed,
-      allTopics: [...new Set(processed.flatMap(p => p.topics))]
-    };
-  }
-
-  // ============================================
-  // RANK TRACKING
-  // Check where a domain ranks for specific keywords
-  // ============================================
-  async trackRanking(keyword, targetDomain) {
-    const searchResult = await this.searchKeyword(keyword, { limit: 20 });
-    
-    if (!searchResult.success) {
-      return { keyword, position: null, error: searchResult.error };
-    }
-
-    const domainClean = targetDomain.replace(/^(https?:\/\/)?(www\.)?/, '');
-    
-    const ourResult = searchResult.results.find(r => 
-      r.domain.includes(domainClean)
-    );
-
-    return {
-      keyword,
-      position: ourResult ? ourResult.position : null,
-      url: ourResult?.url || null,
-      isRanking: !!ourResult,
-      topResults: searchResult.results.slice(0, 5),
-      competitorPositions: this._extractCompetitorPositions(searchResult.results),
-      checkedAt: new Date().toISOString()
-    };
-  }
-
-  // ============================================
-  // CONTENT RESEARCH
-  // Deep-research a topic using Firecrawl's agent
-  // ============================================
-  async researchTopic(prompt) {
-    try {
-      const response = await fetch(`${FIRECRAWL_BASE}/agent`, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          prompt,
-          timeout: 60000
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Agent research failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      this.creditsUsed += 10; // Agent uses more credits
-
-      return {
-        success: true,
-        data: data.data || data,
-        sources: data.sources || []
-      };
-    } catch (error) {
-      console.error('Research failed:', error.message);
-      return { success: false, error: error.message };
-    }
-  }
-
-  // ============================================
-  // URL MAP
-  // Get all URLs from a domain (for site audit)
-  // ============================================
-  async mapDomain(domain, options = {}) {
-    const { search = null, limit = 1000 } = options;
-    
-    try {
-      const body = {
-        url: `https://${domain}`,
-        limit
-      };
-      if (search) body.search = search;
-
-      const response = await fetch(`${FIRECRAWL_BASE}/map`, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(body)
-      });
-
-      const data = await response.json();
-      this.creditsUsed += 1;
-
-      return {
-        success: true,
-        domain,
-        urls: data.links || data.data || [],
-        totalUrls: (data.links || data.data || []).length
-      };
-    } catch (error) {
-      return { success: false, domain, error: error.message, urls: [] };
-    }
-  }
-
-  // ============================================
-  // HELPERS
-  // ============================================
-  _extractCompetitorPositions(results) {
-    const competitorDomains = [
-      'wise.com', 'remitly.com', 'worldremit.com',
-      'mercury.com', 'chime.com', 'novacredit.com',
-      'nerdwallet.com', 'bankrate.com', 'creditkarma.com'
-    ];
-
-    const positions = {};
-    results.forEach(r => {
-      competitorDomains.forEach(comp => {
-        if (r.domain.includes(comp.replace('www.', ''))) {
-          positions[comp] = r.position;
-        }
-      });
-    });
-    return positions;
-  }
-
-  getCreditsUsed() {
-    return this.creditsUsed;
-  }
-
-  resetCreditsCounter() {
-    this.creditsUsed = 0;
-  }
+  return data;
 }
 
-module.exports = { FirecrawlService };
+// ============================================
+// SCRAPE — single URL, multiple formats
+// ============================================
+
+async function scrape(url, options = {}) {
+  const {
+    formats = ['markdown'],
+    onlyMainContent = true,
+    includeTags,
+    excludeTags,
+    waitFor,
+    timeout = 30000,
+    location,           // { country: "PH", languages: ["tl", "en"] }
+    actions,            // [{ type: "click", selector: "#tab" }, ...]
+    mobile = false,
+    jsonSchema,         // pass schema for structured extraction
+    jsonPrompt,         // or just a prompt
+    changeTrackingModes,// ["git-diff"] or ["json"]
+    changeTrackingSchema,
+    changeTrackingTag
+  } = options;
+
+  // Build formats array
+  const formatsArr = [...formats];
+
+  // Add JSON extraction if schema or prompt provided
+  if (jsonSchema || jsonPrompt) {
+    const jsonFormat = { type: 'json' };
+    if (jsonSchema) jsonFormat.schema = jsonSchema;
+    if (jsonPrompt) jsonFormat.prompt = jsonPrompt;
+    formatsArr.push(jsonFormat);
+  }
+
+  // Add change tracking if modes provided
+  if (changeTrackingModes) {
+    const ct = { type: 'changeTracking', modes: changeTrackingModes };
+    if (changeTrackingSchema) ct.schema = changeTrackingSchema;
+    if (changeTrackingTag) ct.tag = changeTrackingTag;
+    formatsArr.push(ct);
+  }
+
+  const body = { url, formats: formatsArr, onlyMainContent, timeout, mobile };
+  if (includeTags) body.includeTags = includeTags;
+  if (excludeTags) body.excludeTags = excludeTags;
+  if (waitFor) body.waitFor = waitFor;
+  if (location) body.location = location;
+  if (actions) body.actions = actions;
+
+  return firecrawlRequest('/scrape', body);
+}
+
+// ============================================
+// SEARCH — web, news, images with filters
+// ============================================
+
+async function search(query, options = {}) {
+  const {
+    limit = 5,
+    sources = ['web'],        // "web", "news", "images"
+    categories,               // [{ type: "github" }], [{ type: "research" }]
+    tbs,                      // "qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y" or custom date range
+    location,                 // "San Francisco,California,United States"
+    country = 'US',           // ISO code
+    scrapeOptions,            // { formats: ["markdown"], onlyMainContent: true }
+    timeout = 60000
+  } = options;
+
+  const body = { query, limit, sources, country, timeout };
+  if (categories) body.categories = categories;
+  if (tbs) body.tbs = tbs;
+  if (location) body.location = location;
+  if (scrapeOptions) body.scrapeOptions = scrapeOptions;
+
+  return firecrawlRequest('/search', body);
+}
+
+// ============================================
+// CRAWL — recursive site crawl (async)
+// ============================================
+
+async function crawl(url, options = {}) {
+  const {
+    limit = 50,
+    maxDepth = 3,
+    includePaths,             // ["blog/.*", "docs/.*"]
+    excludePaths,             // ["admin/.*"]
+    formats = ['markdown'],
+    onlyMainContent = true,
+    allowSubdomains = false,
+    changeTracking = false,
+    webhook                   // { url: "...", events: ["completed"] }
+  } = options;
+
+  const formatsArr = [...formats];
+  if (changeTracking) {
+    formatsArr.push({ type: 'changeTracking', modes: ['git-diff'] });
+  }
+
+  const body = {
+    url, limit, maxDepth, formats: formatsArr,
+    onlyMainContent, allowSubdomains
+  };
+  if (includePaths) body.includePaths = includePaths;
+  if (excludePaths) body.excludePaths = excludePaths;
+  if (webhook) body.webhook = webhook;
+
+  return firecrawlRequest('/crawl', body);
+}
+
+async function getCrawlStatus(crawlId) {
+  return firecrawlRequest(`/crawl/${crawlId}`, {}, 'GET');
+}
+
+// ============================================
+// MAP — fast URL discovery (1 credit regardless of URL count)
+// ============================================
+
+async function map(url, options = {}) {
+  const {
+    limit = 5000,
+    search: searchFilter,       // filter URLs by keyword
+    sitemap = 'include',        // "include", "only", "ignore"
+    includeSubdomains = false,
+    location                    // { country: "US", languages: ["en"] }
+  } = options;
+
+  const body = { url, limit, sitemap, includeSubdomains };
+  if (searchFilter) body.search = searchFilter;
+  if (location) body.location = location;
+
+  return firecrawlRequest('/map', body);
+}
+
+// ============================================
+// BATCH SCRAPE — parallel URL processing
+// ============================================
+
+async function batchScrape(urls, options = {}) {
+  const {
+    formats = ['markdown'],
+    onlyMainContent = true,
+    maxConcurrency,
+    webhook,                  // { url: "...", events: ["completed"] }
+    jsonSchema,
+    jsonPrompt,
+    changeTrackingModes
+  } = options;
+
+  const formatsArr = [...formats];
+  if (jsonSchema || jsonPrompt) {
+    const jf = { type: 'json' };
+    if (jsonSchema) jf.schema = jsonSchema;
+    if (jsonPrompt) jf.prompt = jsonPrompt;
+    formatsArr.push(jf);
+  }
+  if (changeTrackingModes) {
+    formatsArr.push({ type: 'changeTracking', modes: changeTrackingModes });
+  }
+
+  const body = { urls, formats: formatsArr, onlyMainContent, ignoreInvalidURLs: true };
+  if (maxConcurrency) body.maxConcurrency = maxConcurrency;
+  if (webhook) body.webhook = webhook;
+
+  return firecrawlRequest('/batch/scrape', body);
+}
+
+async function getBatchStatus(batchId) {
+  return firecrawlRequest(`/batch/scrape/${batchId}`, {}, 'GET');
+}
+
+// ============================================
+// AGENT — autonomous AI research (Spark 1 models)
+// ============================================
+
+async function agent(prompt, options = {}) {
+  const {
+    urls,                     // optional starting URLs
+    schema,                   // JSON schema or Pydantic-style
+    model = 'spark-1-mini',   // "spark-1-mini" (default, 60% cheaper) or "spark-1-pro"
+    maxCredits = 100          // spending cap
+  } = options;
+
+  const body = { prompt, model, maxCredits };
+  if (urls) body.urls = urls;
+  if (schema) body.schema = schema;
+
+  return firecrawlRequest('/agent', body);
+}
+
+async function getAgentStatus(agentId) {
+  return firecrawlRequest(`/agent/${agentId}`, {}, 'GET');
+}
+
+module.exports = {
+  scrape,
+  search,
+  crawl,
+  getCrawlStatus,
+  map,
+  batchScrape,
+  getBatchStatus,
+  agent,
+  getAgentStatus,
+  firecrawlRequest
+};

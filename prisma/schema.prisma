@@ -1,9 +1,3 @@
-// ============================================
-// SEO Agent - Database Schema
-// Supports both single-tenant (for Plu) and
-// multi-tenant (for SaaS product) modes
-// ============================================
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,35 +8,31 @@ datasource db {
 }
 
 // ============================================
-// Multi-tenant: Organization / Account
+// MULTI-TENANT: Organizations + Users
 // ============================================
+
 model Organization {
   id              String   @id @default(cuid())
   name            String
-  slug            String   @unique
-  domain          String   // Their primary domain to track
+  domain          String
+  plan            Plan     @default(FREE)
   stripeCustomerId String? @unique
-  plan            Plan     @default(STARTER)
-  status          OrgStatus @default(ACTIVE)
-  
-  // Limits based on plan
-  maxKeywords     Int      @default(50)
-  maxCompetitors  Int      @default(5)
-  maxBlogsPerWeek Int      @default(3)
-  
+  stripeSubId     String?  @unique
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
-  // Relations
+
+  apiKeys         ApiKey[]
   users           User[]
-  competitors     Competitor[]
   keywords        Keyword[]
-  scrapeRuns      ScrapeRun[]
-  blogDrafts      BlogDraft[]
+  competitors     Competitor[]
   rankSnapshots   RankSnapshot[]
-  
-  @@index([slug])
-  @@index([stripeCustomerId])
+  blogDrafts      BlogDraft[]
+  scrapeRuns      ScrapeRun[]
+  monitoredUrls   MonitoredUrl[]
+  auditRuns       AuditRun[]
+  geoReports      GeoReport[]
+  usageLogs       UsageLog[]
+  webhookConfigs  WebhookConfig[]
 }
 
 model User {
@@ -50,176 +40,306 @@ model User {
   email           String   @unique
   name            String?
   role            UserRole @default(MEMBER)
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
-  
-  @@index([organizationId])
+
+  @@index([orgId])
+}
+
+model ApiKey {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  name            String   @default("Default")
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([key])
+  @@index([orgId])
 }
 
 // ============================================
-// Competitors to Track
+// USAGE TRACKING + BILLING
 // ============================================
-model Competitor {
+
+model UsageLog {
   id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
-  name            String
-  domain          String
-  blogPath        String   @default("/blog")
-  isActive        Boolean  @default(true)
-  
-  // Last crawl data
-  lastCrawledAt   DateTime?
-  pagesFound      Int      @default(0)
-  avgWordCount    Int      @default(0)
-  
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  operation       String        // e.g. "keyword.search", "blog.generate"
+  credits         Int
+  endpoint        String        // e.g. "/api/keywords/search"
+  metadata        Json?         // request details for audit
+  createdAt       DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([orgId, operation])
+}
+
+// ============================================
+// KEYWORDS
+// ============================================
+
+model Keyword {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  keyword         String
+  segment         String   @default("general")
+  intent          KeywordIntent?
+  difficulty      String?       // easy, medium, hard
+  lastPosition    Int?
+  lastCheckedAt   DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
+
+  rankSnapshots   RankSnapshot[]
+
+  @@unique([orgId, keyword])
+  @@index([orgId, segment])
+}
+
+// ============================================
+// RANKINGS
+// ============================================
+
+model RankSnapshot {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  keywordId       String
+  keyword         Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  position        Int?          // null = not ranking
+  url             String?       // URL that's ranking
+  region          String   @default("US")
+  serpFeatures    Json?         // { featuredSnippet: bool, aiOverview: bool, paa: bool, ... }
+  topResults      Json?         // top 5 SERP results snapshot
+  checkedAt       DateTime @default(now())
+
+  @@index([orgId, keywordId, checkedAt])
+  @@index([keywordId, region, checkedAt])
+}
+
+// ============================================
+// COMPETITORS
+// ============================================
+
+model Competitor {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  domain          String
+  blogPath        String   @default("/blog")
+  lastCrawledAt   DateTime?
+  pageCount       Int?
+  createdAt       DateTime @default(now())
+
   insights        CompetitorInsight[]
-  
-  @@unique([organizationId, domain])
-  @@index([organizationId])
+
+  @@unique([orgId, domain])
 }
 
 model CompetitorInsight {
   id              String   @id @default(cuid())
   competitorId    String
-  competitor      Competitor @relation(fields: [competitorId], references: [id])
-  
-  url             String
-  title           String
-  wordCount       Int
-  headings        Json     // { h1s: [], h2s: [] }
-  topics          String[]
-  
-  discoveredAt    DateTime @default(now())
-  
-  @@index([competitorId])
-}
-
-// ============================================
-// Keywords & Tracking
-// ============================================
-model Keyword {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
-  keyword         String
-  segment         String   @default("core")
-  priority        Int      @default(2) // 1 = high, 2 = medium, 3 = low
-  isActive        Boolean  @default(true)
-  
-  // Latest ranking data
-  currentPosition Int?     // null = not ranking
-  bestPosition    Int?
-  opportunity     Opportunity @default(HIGH)
-  
+  competitor      Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  insightType     String        // "content_gap", "pricing_change", "new_page", "ranking_shift"
+  data            Json
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
-  rankings        RankSnapshot[]
-  
-  @@unique([organizationId, keyword])
-  @@index([organizationId])
-  @@index([segment])
-}
 
-model RankSnapshot {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  keywordId       String
-  keyword         Keyword  @relation(fields: [keywordId], references: [id])
-  
-  position        Int?     // null = not found
-  url             String?  // Which of our URLs ranked
-  topResults      Json     // Top 10 results snapshot
-  competitorPositions Json // { "wise.com": 3, "chime.com": 7 }
-  
-  snapshotDate    DateTime @default(now())
-  
-  @@index([keywordId, snapshotDate])
-  @@index([organizationId, snapshotDate])
+  @@index([competitorId, insightType])
 }
 
 // ============================================
-// Scrape Runs & Jobs
+// CONTENT
 // ============================================
-model ScrapeRun {
-  id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
-  type            RunType
-  status          RunStatus @default(PENDING)
-  
-  // Results
-  keywordsScraped Int      @default(0)
-  competitorsCrawled Int   @default(0)
-  contentGapsFound Int     @default(0)
-  creditsUsed     Int      @default(0)
-  
-  // Claude analysis
-  analysis        Json?    // The weekly brief
-  
-  startedAt       DateTime?
-  completedAt     DateTime?
-  error           String?
-  
-  createdAt       DateTime @default(now())
-  
-  @@index([organizationId, createdAt])
-}
 
-// ============================================
-// Blog Drafts
-// ============================================
 model BlogDraft {
   id              String   @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   title           String
   targetKeyword   String
-  segment         String
-  content         String   @db.Text
-  wordCount       Int
-  
-  status          DraftStatus @default(DRAFT)
-  seoScore        Int?     // 0-100
-  
-  // Metadata
-  metaTitle       String?
+  content         String        @db.Text
   metaDescription String?
-  slug            String?
-  
+  wordCount       Int?
+  status          ContentStatus @default(DRAFT)
+  segment         String   @default("general")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  publishedAt     DateTime?
-  
-  @@index([organizationId, status])
+
+  @@index([orgId, status])
+  @@index([orgId, targetKeyword])
 }
 
 // ============================================
-// Enums
+// MONITORING — Change Tracking
 // ============================================
+
+model MonitoredUrl {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url             String
+  label           String?       // "competitor pricing", "our blog post", etc.
+  checkFrequency  CheckFrequency @default(DAILY)
+  isActive        Boolean  @default(true)
+  lastCheckedAt   DateTime?
+  lastChangeAt    DateTime?
+  createdAt       DateTime @default(now())
+
+  changeEvents    ChangeEvent[]
+
+  @@unique([orgId, url])
+  @@index([orgId, isActive])
+}
+
+model ChangeEvent {
+  id              String   @id @default(cuid())
+  monitoredUrlId  String
+  monitoredUrl    MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+  changeStatus    String        // "new", "changed", "unchanged", "removed"
+  changeType      String?       // "content", "pricing", "structure", "metadata"
+  diff            String?  @db.Text  // git-diff output
+  structuredDiff  Json?         // JSON diff for pricing/features
+  previousHash    String?
+  currentHash     String?
+  detectedAt      DateTime @default(now())
+
+  @@index([monitoredUrlId, detectedAt])
+}
+
+// ============================================
+// TECHNICAL SEO AUDITS
+// ============================================
+
+model AuditRun {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  domain          String
+  status          JobStatus @default(PENDING)
+  totalPages      Int?
+  issuesFound     Int?
+  summary         Json?         // { critical: N, warnings: N, info: N }
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  auditPages      AuditPage[]
+
+  @@index([orgId, startedAt])
+}
+
+model AuditPage {
+  id              String   @id @default(cuid())
+  auditRunId      String
+  auditRun        AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  url             String
+  statusCode      Int?
+  metaTitle       String?
+  metaDescription String?
+  h1              String?
+  h1Count         Int?
+  wordCount       Int?
+  hasCanonical    Boolean?
+  canonicalUrl    String?
+  hasSchemaOrg    Boolean?
+  schemaTypes     Json?         // ["Article", "FAQPage", ...]
+  internalLinks   Int?
+  externalLinks   Int?
+  images          Int?
+  imagesNoAlt     Int?
+  issues          Json?         // [{ type: "missing_meta", severity: "critical", ... }]
+  checkedAt       DateTime @default(now())
+
+  @@index([auditRunId])
+}
+
+// ============================================
+// GEO / AEO
+// ============================================
+
+model GeoReport {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reportType      GeoReportType
+  domain          String
+  score           Int?          // 0-100 readability/citation score
+  data            Json          // full report data
+  recommendations Json?
+  createdAt       DateTime @default(now())
+
+  @@index([orgId, reportType])
+}
+
+// ============================================
+// ASYNC JOBS
+// ============================================
+
+model ScrapeRun {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  jobType         String        // "pipeline", "audit", "monitor_batch"
+  status          JobStatus @default(PENDING)
+  config          Json?
+  result          Json?
+  error           String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  @@index([orgId, status])
+}
+
+// ============================================
+// WEBHOOKS
+// ============================================
+
+model WebhookConfig {
+  id              String   @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url             String
+  events          Json          // ["pipeline.completed", "monitor.changed", "ranking.dropped"]
+  secret          String?       // HMAC signing secret
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  deliveries      WebhookDelivery[]
+
+  @@unique([orgId, url])
+}
+
+model WebhookDelivery {
+  id              String   @id @default(cuid())
+  webhookConfigId String
+  webhookConfig   WebhookConfig @relation(fields: [webhookConfigId], references: [id])
+  event           String
+  payload         Json
+  statusCode      Int?
+  response        String?  @db.Text
+  attempts        Int      @default(0)
+  deliveredAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([webhookConfigId, createdAt])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
 enum Plan {
-  STARTER     // $49/mo - 50 keywords, 3 competitors
-  GROWTH      // $149/mo - 200 keywords, 10 competitors
-  SCALE       // $499/mo - 1000 keywords, 25 competitors
-  ENTERPRISE  // Custom
-}
-
-enum OrgStatus {
-  ACTIVE
-  TRIAL
-  SUSPENDED
-  CANCELLED
+  FREE
+  STARTER
+  GROWTH
+  SCALE
+  ENTERPRISE
 }
 
 enum UserRole {
@@ -228,31 +348,37 @@ enum UserRole {
   MEMBER
 }
 
-enum Opportunity {
-  HIGH
-  MEDIUM
-  LOW
+enum KeywordIntent {
+  INFORMATIONAL
+  TRANSACTIONAL
+  NAVIGATIONAL
+  COMMERCIAL
 }
 
-enum RunType {
-  KEYWORD_SCRAPE
-  COMPETITOR_CRAWL
-  RANK_TRACK
-  FULL_PIPELINE
-  BLOG_GENERATION
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
 }
 
-enum RunStatus {
+enum JobStatus {
   PENDING
   RUNNING
   COMPLETED
   FAILED
 }
 
-enum DraftStatus {
-  DRAFT
-  REVIEW
-  APPROVED
-  PUBLISHED
-  ARCHIVED
+enum CheckFrequency {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum GeoReportType {
+  READABILITY
+  BRAND_MONITOR
+  LLMSTXT
+  CITATION_OPTIMIZATION
 }

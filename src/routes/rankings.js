@@ -240,6 +240,59 @@ async function rankingRoutes(fastify) {
       });
     }
   });
+
+  // POST /api/rankings/serp-snapshot — GROWTH+
+  // Body: { keyword: string, country?: string }
+  // Uses: firecrawl.scrape(google search URL) with screenshot format
+  fastify.post('/serp-snapshot', async (request, reply) => {
+    try {
+      if (!checkFeature(request, reply, 'rankings.serp-snapshot')) return;
+
+      const body = schemas.RankSerpSnapshotBody.parse(request.body);
+
+      const { allowed, remaining, cost } = await checkCredits(request, reply, 'rank.serp-snapshot');
+      if (!allowed) return;
+
+      const country = body.country || 'US';
+      const gl = country.toLowerCase();
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(body.keyword)}&gl=${gl}`;
+
+      const result = await firecrawl.scrape(searchUrl, {
+        formats: ['screenshot']
+      });
+
+      const screenshot = result.data?.screenshot || result.screenshot;
+
+      consumeCredits(request, 'rank.serp-snapshot', cost);
+
+      return {
+        success: true,
+        data: {
+          keyword: body.keyword,
+          country,
+          screenshot,
+          base64: !!screenshot
+        },
+        meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
+      };
+    } catch (err) {
+      request.log.error(err);
+      if (err.status) {
+        return reply.code(err.status).send({
+          error: 'upstream_error',
+          message: err.message,
+          details: err.details
+        });
+      }
+      if (err.name === 'ZodError') {
+        return reply.code(400).send({ error: 'validation_error', details: err.errors });
+      }
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: 'Something went wrong. Please try again.'
+      });
+    }
+  });
 }
 
 module.exports = rankingRoutes;

@@ -190,6 +190,72 @@ const DomainMapBody = z.object({
 });
 
 // ============================================
+// Search
+// ============================================
+const SearchNewsBody = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+  country: z.string().length(2).optional(),
+  tbs: z.enum(['qdr:h', 'qdr:d', 'qdr:w', 'qdr:m', 'qdr:y']).optional()
+});
+
+const SearchGithubBody = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional()
+});
+
+const SearchResearchBody = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional()
+});
+
+// ============================================
+// Brand
+// ============================================
+const BrandMentionsBody = z.object({
+  brand: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+  tbs: z.enum(['qdr:h', 'qdr:d', 'qdr:w', 'qdr:m', 'qdr:y']).optional()
+});
+
+const BrandImagesBody = z.object({
+  brand: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional()
+});
+
+// ============================================
+// Intelligence Batch
+// ============================================
+const IntelligenceBatchBody = z.object({
+  prompts: z.array(z.object({
+    topic: z.string().min(1),
+    depth: z.enum(['shallow', 'deep']).optional()
+  })).min(1).max(5),
+  model: z.enum(['spark-1-mini', 'spark-1-pro']).optional()
+});
+
+// ============================================
+// Competitors Scrape Interactive
+// ============================================
+const CompetitorScrapeInteractiveBody = z.object({
+  url: z.string().url(),
+  actions: z.array(z.object({
+    type: z.enum(['click', 'scroll', 'wait', 'input']),
+    selector: z.string().optional(),
+    text: z.string().optional()
+  })).optional(),
+  waitFor: z.string().optional()
+});
+
+// ============================================
+// Rankings SERP Snapshot
+// ============================================
+const RankSerpSnapshotBody = z.object({
+  keyword: z.string().min(1),
+  country: z.string().length(2).optional()
+});
+
+// ============================================
 // Pipeline
 // ============================================
 const PipelineRunBody = z.object({
@@ -209,6 +275,9 @@ module.exports = {
   AuditTechnicalBody, AuditBatchBody, AuditInternalLinksBody,
   GeoBrandMonitorBody, GeoReadabilityBody, GeoLlmstxtBody, GeoOptimizeBody,
   IntelligenceAnalyzeBody, IntelligenceGapsBody, IntelligenceAgentBody,
+  SearchNewsBody, SearchGithubBody, SearchResearchBody,
+  BrandMentionsBody, BrandImagesBody,
+  IntelligenceBatchBody, CompetitorScrapeInteractiveBody, RankSerpSnapshotBody,
   DomainMapBody,
   PipelineRunBody
 };

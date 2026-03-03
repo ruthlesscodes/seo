@@ -233,6 +233,57 @@ async function competitorRoutes(fastify) {
     }
   });
 
+  // POST /api/competitors/scrape-interactive — GROWTH+
+  // Body: { url: string, actions?: [], waitFor?: string }
+  // Uses: firecrawl.scrape with actions and waitFor for page interaction
+  fastify.post('/scrape-interactive', async (request, reply) => {
+    try {
+      if (!checkFeature(request, reply, 'competitors.scrape-interactive')) return;
+
+      const body = schemas.CompetitorScrapeInteractiveBody.parse(request.body);
+
+      const { allowed, remaining, cost } = await checkCredits(request, reply, 'competitor.scrape-interactive');
+      if (!allowed) return;
+
+      const opts = { formats: ['markdown'] };
+      if (body.actions && body.actions.length > 0) {
+        opts.actions = body.actions.map(a => {
+          const action = { type: a.type };
+          if (a.selector) action.selector = a.selector;
+          if (a.text) action.text = a.text;
+          return action;
+        });
+      }
+      if (body.waitFor) opts.waitFor = body.waitFor;
+
+      const result = await firecrawl.scrape(body.url, opts);
+
+      consumeCredits(request, 'competitor.scrape-interactive', cost);
+
+      return {
+        success: true,
+        data: result.data || result,
+        meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
+      };
+    } catch (err) {
+      request.log.error(err);
+      if (err.status) {
+        return reply.code(err.status).send({
+          error: 'upstream_error',
+          message: err.message,
+          details: err.details
+        });
+      }
+      if (err.name === 'ZodError') {
+        return reply.code(400).send({ error: 'validation_error', details: err.errors });
+      }
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: 'Something went wrong. Please try again.'
+      });
+    }
+  });
+
   // POST /api/competitors/brand — SCALE+ only
   // Body: { url: string }
   // Uses: firecrawl.scrape(url, { formats: ["branding"] })

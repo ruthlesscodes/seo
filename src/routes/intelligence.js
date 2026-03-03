@@ -266,6 +266,84 @@ async function intelligenceRoutes(fastify) {
       });
     }
   });
+
+  // POST /api/intelligence/batch — GROWTH+
+  // Body: { prompts: [{ topic, depth? }], model?: string }
+  // Uses: firecrawl.agent() in parallel for each prompt
+  fastify.post('/batch', async (request, reply) => {
+    try {
+      if (!checkFeature(request, reply, 'intelligence.batch')) return;
+
+      const body = schemas.IntelligenceBatchBody.parse(request.body);
+
+      const cost = body.prompts.length * 20;
+      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'intelligence.batch', body.prompts.length);
+      if (!allowed) return;
+
+      const model = body.model || 'spark-1-mini';
+
+      const agentPromises = body.prompts.map(p => {
+        const agentRes = firecrawl.agent(p.topic, {
+          model: p.depth === 'deep' ? 'spark-1-pro' : model,
+          maxCredits: 50
+        });
+        return agentRes.then(res => ({ prompt: p, agentRes: res }));
+      });
+
+      const started = await Promise.all(agentPromises);
+      const agentIds = started.map(s => s.agentRes.id || s.agentRes.data?.id);
+
+      const results = [];
+      for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statuses = await Promise.all(agentIds.map(id => firecrawl.getAgentStatus(id)));
+        const allDone = statuses.every(s => (s.status || s.data?.status) === 'completed' || (s.status || s.data?.status) === 'failed');
+        if (allDone) {
+          for (let j = 0; j < statuses.length; j++) {
+            const s = statuses[j];
+            results.push({
+              topic: body.prompts[j].topic,
+              status: s.status || s.data?.status,
+              data: s.data || s.result || s
+            });
+          }
+          break;
+        }
+      }
+
+      if (results.length === 0) {
+        results.push(...body.prompts.map((p, i) => ({
+          topic: p.topic,
+          status: 'timeout',
+          agentId: agentIds[i]
+        })));
+      }
+
+      consumeCredits(request, 'intelligence.batch', creditCost);
+
+      return {
+        success: true,
+        data: { results },
+        meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
+      };
+    } catch (err) {
+      request.log.error(err);
+      if (err.status) {
+        return reply.code(err.status).send({
+          error: 'upstream_error',
+          message: err.message,
+          details: err.details
+        });
+      }
+      if (err.name === 'ZodError') {
+        return reply.code(400).send({ error: 'validation_error', details: err.errors });
+      }
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: 'Something went wrong. Please try again.'
+      });
+    }
+  });
 }
 
 module.exports = intelligenceRoutes;

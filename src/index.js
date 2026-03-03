@@ -7,8 +7,8 @@ const { usageMiddleware } = require('./middleware/usage');
 const { prisma } = require('./utils/prisma');
 const { redis } = require('./utils/redis');
 const { registerPluOrg } = require('./utils/bootstrap');
-const { startScheduler } = require('./jobs/scheduler');
-const { worker } = require('./jobs/pipelineWorker');
+
+let worker = null;
 
 const fastify = Fastify({
   logger: {
@@ -45,6 +45,8 @@ fastify.register(require('./routes/keywords'),      { prefix: '/api/keywords' })
 fastify.register(require('./routes/competitors'),   { prefix: '/api/competitors' });
 fastify.register(require('./routes/content'),       { prefix: '/api/content' });
 fastify.register(require('./routes/rankings'),      { prefix: '/api/rankings' });
+fastify.register(require('./routes/search'),        { prefix: '/api/search' });
+fastify.register(require('./routes/brand'),         { prefix: '/api/brand' });
 fastify.register(require('./routes/intelligence'),  { prefix: '/api/intelligence' });
 fastify.register(require('./routes/domain'),        { prefix: '/api/domain' });
 fastify.register(require('./routes/monitor'),       { prefix: '/api/monitor' });
@@ -57,22 +59,38 @@ fastify.register(require('./routes/billing'),       { prefix: '/api/billing' });
 // ============================================
 // START
 // ============================================
+const CONNECT_TIMEOUT = 10000; // 10s
+
 const start = async () => {
   try {
-    // Ensure DB connection
-    await prisma.$connect();
+    // Ensure DB connection (with timeout)
+    await Promise.race([
+      prisma.$connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database connection timeout')), CONNECT_TIMEOUT))
+    ]);
     console.log('✅ Database connected');
 
-    // Ensure Redis connection
-    await redis.ping();
+    // Ensure Redis connection (with timeout)
+    await Promise.race([
+      redis.ping(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Redis connection timeout')), CONNECT_TIMEOUT))
+    ]);
     console.log('✅ Redis connected');
 
     // Register Plu as internal Enterprise org
     const pluApiKey = await registerPluOrg(prisma);
     console.log(`\n🔑 Plu API key: ${pluApiKey}\n`);
 
-    startScheduler(fastify.log);
-    console.log('✅ Scheduler + pipeline worker started');
+    // Start background jobs (non-blocking; failures don't prevent server start)
+    try {
+      const { startScheduler } = require('./jobs/scheduler');
+      const { worker: w } = require('./jobs/pipelineWorker');
+      worker = w;
+      startScheduler(fastify.log);
+      console.log('✅ Scheduler + pipeline worker started');
+    } catch (e) {
+      console.warn('⚠️ Background jobs failed to start:', e.message);
+    }
 
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`🔥 SEO Agent API v2 — port ${PORT}`);
@@ -87,7 +105,7 @@ const start = async () => {
 
 // Graceful shutdown
 const shutdown = async () => {
-  await worker.close();
+  if (worker) await worker.close().catch(() => {});
   await fastify.close();
   await prisma.$disconnect();
   await redis.quit();

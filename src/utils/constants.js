@@ -40,8 +40,10 @@ const PLAN_LIMITS = {
       'refresh', 'pipeline',
       'audit.batch', 'audit.internal-links',
       'monitor.pricing', 'monitor.decay',
-      'rankings.global', 'rankings.serp-features',
-      'trending', 'brand.mentions',
+      'rankings.global', 'rankings.serp-features', 'rankings.serp-snapshot',
+      'trending', 'brand.mentions', 'brand.images',
+      'search.github', 'search.research',
+      'intelligence.batch', 'competitors.scrape-interactive',
       'geo.readability', 'geo.llmstxt'
     ]
   },
@@ -79,6 +81,7 @@ const CREDIT_COSTS = {
   // Competitors
   'competitor.crawl':    10,
   'competitor.scrape':    1,
+  'competitor.scrape-interactive': 3,
   'competitor.compare':   8,
   'competitor.brand':     3,
 
@@ -92,6 +95,7 @@ const CREDIT_COSTS = {
   'rank.check':           1,   // per keyword
   'rank.global':          3,   // per region
   'rank.serp-features':   3,   // per keyword
+  'rank.serp-snapshot':   5,   // per SERP screenshot
 
   // Intelligence
   'analyze.brief':       20,

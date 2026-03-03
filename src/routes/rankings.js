@@ -32,14 +32,17 @@ async function rankingRoutes(fastify) {
       const body = schemas.RankCheckBody.parse(request.body);
 
       const cost = body.keywords.length;
-      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rank.check', cost);
+      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rank.track', cost);
       if (!allowed) return;
 
       const results = [];
       const domainLower = body.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const country = body.country || body.region || 'US';
+      const searchOpts = { limit: 10, country };
+      if (body.location) searchOpts.location = body.location;
 
       for (const keyword of body.keywords) {
-        const searchRes = await firecrawl.search(keyword, { limit: 10, country: body.region });
+        const searchRes = await firecrawl.search(keyword, searchOpts);
         const webResults = searchRes.data?.web || searchRes.data?.results || [];
         const { position, url } = findDomainPosition(webResults, body.domain);
 
@@ -55,7 +58,7 @@ async function rankingRoutes(fastify) {
             keywordId: kw.id,
             position,
             url,
-            region: body.region,
+            region: country,
             topResults: webResults.slice(0, 5).map((r, i) => ({
               title: r.title || r.name,
               url: r.url,
@@ -67,7 +70,7 @@ async function rankingRoutes(fastify) {
         results.push({ keyword, position, url });
       }
 
-      consumeCredits(request, 'rank.check', creditCost);
+      consumeCredits(request, 'rank.track', creditCost);
 
       return {
         success: true,
@@ -103,7 +106,7 @@ async function rankingRoutes(fastify) {
       const body = schemas.RankGlobalBody.parse(request.body);
 
       const cost = body.regions.length;
-      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rank.global', cost);
+      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rankings.global', cost);
       if (!allowed) return;
 
       const positions = {};
@@ -135,7 +138,7 @@ async function rankingRoutes(fastify) {
         });
       }
 
-      consumeCredits(request, 'rank.global', creditCost);
+      consumeCredits(request, 'rankings.global', creditCost);
 
       return {
         success: true,
@@ -171,7 +174,7 @@ async function rankingRoutes(fastify) {
       const body = SerpFeaturesBody.parse(request.body);
 
       const cost = body.keywords.length;
-      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rank.serp-features', cost);
+      const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'rankings.serp-features', cost);
       if (!allowed) return;
 
       const results = [];
@@ -215,7 +218,7 @@ async function rankingRoutes(fastify) {
         results.push({ keyword, serpFeatures });
       }
 
-      consumeCredits(request, 'rank.serp-features', creditCost);
+      consumeCredits(request, 'rankings.serp-features', creditCost);
 
       return {
         success: true,
@@ -246,11 +249,11 @@ async function rankingRoutes(fastify) {
   // Uses: firecrawl.scrape(google search URL) with screenshot format
   fastify.post('/serp-snapshot', async (request, reply) => {
     try {
-      if (!checkFeature(request, reply, 'rankings.serp-snapshot')) return;
+      if (!checkFeature(request, reply, 'serp-snapshot')) return;
 
       const body = schemas.RankSerpSnapshotBody.parse(request.body);
 
-      const { allowed, remaining, cost } = await checkCredits(request, reply, 'rank.serp-snapshot');
+      const { allowed, remaining, cost } = await checkCredits(request, reply, 'rankings.serp-snapshot');
       if (!allowed) return;
 
       const country = body.country || 'US';
@@ -263,7 +266,7 @@ async function rankingRoutes(fastify) {
 
       const screenshot = result.data?.screenshot || result.screenshot;
 
-      consumeCredits(request, 'rank.serp-snapshot', cost);
+      consumeCredits(request, 'rankings.serp-snapshot', cost);
 
       return {
         success: true,

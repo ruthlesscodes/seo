@@ -194,7 +194,7 @@ async function contentRoutes(fastify) {
 
       const body = schemas.ContentTrendingBody.parse(request.body);
 
-      const { allowed, remaining, cost } = await checkCredits(request, reply, 'content.trending');
+      const { allowed, remaining, cost } = await checkCredits(request, reply, 'search.trending');
       if (!allowed) return;
 
       const tbsMap = { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m' };
@@ -209,7 +209,7 @@ async function contentRoutes(fastify) {
       const webResults = searchRes.data?.web || searchRes.data?.results || [];
       const newsResults = searchRes.data?.news || [];
 
-      consumeCredits(request, 'content.trending', cost);
+      consumeCredits(request, 'search.trending', cost);
 
       return {
         success: true,

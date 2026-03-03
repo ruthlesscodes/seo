@@ -238,7 +238,7 @@ async function competitorRoutes(fastify) {
   // Uses: firecrawl.scrape with actions and waitFor for page interaction
   fastify.post('/scrape-interactive', async (request, reply) => {
     try {
-      if (!checkFeature(request, reply, 'competitors.scrape-interactive')) return;
+      if (!checkFeature(request, reply, 'actions')) return;
 
       const body = schemas.CompetitorScrapeInteractiveBody.parse(request.body);
 
@@ -293,12 +293,12 @@ async function competitorRoutes(fastify) {
 
       const body = CompetitorBrandBody.parse(request.body);
 
-      const { allowed, remaining, cost } = await checkCredits(request, reply, 'competitor.brand');
+      const { allowed, remaining, cost } = await checkCredits(request, reply, 'competitors.brand');
       if (!allowed) return;
 
       const result = await firecrawl.scrape(body.url, { formats: ['branding'] });
 
-      consumeCredits(request, 'competitor.brand', cost);
+      consumeCredits(request, 'competitors.brand', cost);
 
       return {
         success: true,

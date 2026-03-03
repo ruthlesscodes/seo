@@ -87,7 +87,9 @@ const ContentTrendingBody = z.object({
 const RankCheckBody = z.object({
   keywords: z.array(z.string().min(1)).min(1).max(500),
   domain: z.string().min(3),
-  region: RegionCode.default('US')
+  region: RegionCode.optional(),
+  country: RegionCode.optional(),
+  location: z.string().optional()
 });
 
 const RankGlobalBody = z.object({

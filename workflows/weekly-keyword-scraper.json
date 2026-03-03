@@ -1,0 +1,363 @@
+{
+  "name": "🔥 Weekly SEO Keyword Scraper & Content Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [0],
+              "triggerAtHour": 22
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Sunday 10PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// SEED KEYWORDS & COMPETITOR DOMAINS CONFIG\n// ============================================\n// Edit these for your business. This is the brain of the system.\n\nconst config = {\n  // Your domain\n  yourDomain: 'getplu.com',\n  \n  // Competitor domains to crawl\n  competitors: [\n    { name: 'Wise', domain: 'wise.com', blogPath: '/blog' },\n    { name: 'Remitly', domain: 'remitly.com', blogPath: '/blog' },\n    { name: 'WorldRemit', domain: 'worldremit.com', blogPath: '/blog' },\n    { name: 'Mercury', domain: 'mercury.com', blogPath: '/blog' },\n    { name: 'Chime', domain: 'chime.com', blogPath: '/blog' },\n    { name: 'Nova Credit', domain: 'novacredit.com', blogPath: '/resources' }\n  ],\n  \n  // Seed keywords organized by segment\n  seedKeywords: {\n    // Core product keywords\n    core: [\n      'build credit as immigrant',\n      'credit card for immigrants',\n      'neobank for immigrants',\n      'no credit history banking',\n      'immigrant credit building',\n      'credit card no SSN',\n      'build credit fast immigrant',\n      'banking for non citizens',\n      'credit score for newcomers',\n      'immigrant friendly bank'\n    ],\n    \n    // Filipino OFW segment\n    ofw: [\n      'OFW remittance fees',\n      'OFW banking abroad',\n      'Filipino credit card abroad',\n      'OFW savings account',\n      'Philippine remittance cheapest',\n      'OFW financial planning',\n      'balikbayan banking',\n      'OFW credit building',\n      'Filipino worker banking UK',\n      'Filipino worker banking Dubai'\n    ],\n    \n    // Nigerian diaspora segment\n    nigerian: [\n      'Nigerian diaspora banking',\n      'Japa banking guide',\n      'Nigerian immigrant credit UK',\n      'naira to dollar best rate',\n      'Nigerian abroad bank account',\n      'japa financial planning',\n      'Nigerian credit building US',\n      'send money to Nigeria cheap',\n      'Nigerian diaspora fintech',\n      'banking for Nigerians in Canada'\n    ],\n    \n    // US immigrant segment\n    us_immigrant: [\n      'H1B visa credit card',\n      'F1 student credit card',\n      'ITIN credit card',\n      'build credit with ITIN',\n      'immigrant credit score US',\n      'new to US banking',\n      'credit builder for visa holders',\n      'secured credit card immigrants',\n      'credit union for immigrants',\n      'green card holder banking'\n    ],\n    \n    // Niche use-case segments (matching your landing pages)\n    niche: [\n      'gamer banking international',\n      'crypto worker banking',\n      'content creator banking abroad',\n      'healthcare worker abroad banking',\n      'remote worker international banking',\n      'digital nomad credit card',\n      'freelancer credit building',\n      'zero forex fee card',\n      'international student banking',\n      'expat credit card'\n    ]\n  }\n};\n\n// Flatten all keywords for processing\nconst allKeywords = [];\nfor (const [segment, keywords] of Object.entries(config.seedKeywords)) {\n  keywords.forEach(kw => {\n    allKeywords.push({ keyword: kw, segment, priority: segment === 'core' ? 1 : 2 });\n  });\n}\n\nreturn [\n  {\n    json: {\n      config,\n      allKeywords,\n      totalKeywords: allKeywords.length,\n      competitors: config.competitors,\n      runDate: new Date().toISOString(),\n      runId: `run_${Date.now()}`\n    }\n  }\n];"
+      },
+      "id": "config-loader",
+      "name": "Load Config & Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($input.first().json.allKeywords.map(k => ({ json: k }))) }}"
+      },
+      "id": "split-keywords",
+      "name": "Split Keywords",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [440, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v2/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"{{ $json.keyword }}\",\n  \"limit\": 10,\n  \"scrapeOptions\": {\n    \"formats\": [\"markdown\", \"links\"]\n  }\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "firecrawl-search",
+      "name": "Firecrawl: Search Keywords",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -100],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FIRECRAWL_CREDENTIAL_ID",
+          "name": "Firecrawl API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process search results into structured keyword data\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const keyword = item.json.keyword || 'unknown';\n  const segment = item.json.segment || 'unknown';\n  const searchData = item.json.data?.web || item.json.data || [];\n  \n  const topResults = (Array.isArray(searchData) ? searchData : []).slice(0, 10).map((r, i) => ({\n    position: i + 1,\n    url: r.url || '',\n    title: r.title || '',\n    description: r.description || '',\n    domain: r.url ? new URL(r.url).hostname : ''\n  }));\n  \n  // Check if our domain appears\n  const ourPosition = topResults.findIndex(r => \n    r.domain.includes('getplu.com') || r.domain.includes('plu.com')\n  );\n  \n  // Identify which competitors appear\n  const competitorPositions = {};\n  const competitors = ['wise.com', 'remitly.com', 'worldremit.com', 'mercury.com', 'chime.com', 'novacredit.com'];\n  \n  topResults.forEach(r => {\n    competitors.forEach(comp => {\n      if (r.domain.includes(comp)) {\n        competitorPositions[comp] = r.position;\n      }\n    });\n  });\n  \n  results.push({\n    keyword,\n    segment,\n    resultCount: topResults.length,\n    ourPosition: ourPosition >= 0 ? ourPosition + 1 : null,\n    ourRanking: ourPosition >= 0 ? 'RANKING' : 'NOT_RANKING',\n    competitorPositions,\n    topResults,\n    opportunity: ourPosition < 0 ? 'HIGH' : (ourPosition > 4 ? 'MEDIUM' : 'LOW'),\n    contentGap: ourPosition < 0,\n    scrapedAt: new Date().toISOString()\n  });\n}\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "id": "process-search-results",
+      "name": "Process Search Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($input.first().json.config.competitors.map(c => ({ json: c }))) }}"
+      },
+      "id": "split-competitors",
+      "name": "Split Competitors",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [440, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v2/crawl",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"https://{{ $json.domain }}{{ $json.blogPath }}\",\n  \"limit\": 20,\n  \"scrapeOptions\": {\n    \"formats\": [\"markdown\"],\n    \"onlyMainContent\": true\n  }\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "firecrawl-crawl-competitors",
+      "name": "Firecrawl: Crawl Competitor Blogs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 100],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FIRECRAWL_CREDENTIAL_ID",
+          "name": "Firecrawl API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract competitor content intelligence\nconst items = $input.all();\nconst competitorInsights = [];\n\nfor (const item of items) {\n  const competitor = item.json.name || 'Unknown';\n  const pages = item.json.data || [];\n  \n  const processedPages = (Array.isArray(pages) ? pages : []).map(page => {\n    const markdown = page.markdown || '';\n    const metadata = page.metadata || {};\n    \n    // Extract headings from markdown\n    const h1s = (markdown.match(/^# .+$/gm) || []).map(h => h.replace('# ', ''));\n    const h2s = (markdown.match(/^## .+$/gm) || []).map(h => h.replace('## ', ''));\n    \n    // Estimate word count\n    const wordCount = markdown.split(/\\s+/).length;\n    \n    return {\n      url: metadata.sourceURL || page.url || '',\n      title: metadata.title || h1s[0] || 'Untitled',\n      description: metadata.description || '',\n      headings: { h1s, h2s },\n      wordCount,\n      hasImages: markdown.includes('!['),\n      hasLinks: markdown.includes('['),\n      estimatedReadTime: Math.ceil(wordCount / 200)\n    };\n  });\n  \n  competitorInsights.push({\n    competitor,\n    domain: item.json.domain,\n    pagesAnalyzed: processedPages.length,\n    pages: processedPages,\n    avgWordCount: processedPages.length > 0 \n      ? Math.round(processedPages.reduce((a, p) => a + p.wordCount, 0) / processedPages.length)\n      : 0,\n    topics: processedPages.map(p => p.title),\n    analyzedAt: new Date().toISOString()\n  });\n}\n\nreturn competitorInsights.map(ci => ({ json: ci }));"
+      },
+      "id": "process-competitor-data",
+      "name": "Process Competitor Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge keyword results and competitor insights\nconst keywordData = $('Process Search Results').all().map(i => i.json);\nconst competitorData = $('Process Competitor Data').all().map(i => i.json);\n\n// Build the unified report\nconst report = {\n  runId: $('Load Config & Keywords').first().json.runId,\n  runDate: $('Load Config & Keywords').first().json.runDate,\n  summary: {\n    totalKeywordsAnalyzed: keywordData.length,\n    keywordsRanking: keywordData.filter(k => k.ourRanking === 'RANKING').length,\n    keywordsNotRanking: keywordData.filter(k => k.ourRanking === 'NOT_RANKING').length,\n    highOpportunity: keywordData.filter(k => k.opportunity === 'HIGH').length,\n    competitorsAnalyzed: competitorData.length\n  },\n  \n  // Keywords grouped by segment\n  keywordsBySegment: {},\n  \n  // Content gaps (keywords we don't rank for)\n  contentGaps: keywordData.filter(k => k.contentGap).map(k => ({\n    keyword: k.keyword,\n    segment: k.segment,\n    competitorsRanking: Object.keys(k.competitorPositions),\n    topResult: k.topResults[0]\n  })),\n  \n  // Competitor intelligence\n  competitorIntel: competitorData.map(c => ({\n    name: c.competitor,\n    pagesFound: c.pagesAnalyzed,\n    avgWordCount: c.avgWordCount,\n    recentTopics: c.topics.slice(0, 10)\n  })),\n  \n  // All keyword data for Claude analysis\n  rawKeywordData: keywordData,\n  rawCompetitorData: competitorData\n};\n\n// Group keywords by segment\nkeywordData.forEach(k => {\n  if (!report.keywordsBySegment[k.segment]) {\n    report.keywordsBySegment[k.segment] = [];\n  }\n  report.keywordsBySegment[k.segment].push({\n    keyword: k.keyword,\n    ourPosition: k.ourPosition,\n    opportunity: k.opportunity,\n    topCompetitor: Object.entries(k.competitorPositions)[0] || null\n  });\n});\n\nreturn [{ json: report }];"
+      },
+      "id": "merge-data",
+      "name": "Merge & Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $credentials.httpHeaderAuth.value }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 4000,\n  \"system\": \"You are an expert SEO strategist for Plu, a fintech neobank for immigrants. Analyze keyword and competitor data to produce actionable weekly SEO briefs. Focus on content gaps, high-opportunity keywords, and specific blog post recommendations. Output valid JSON only.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze this SEO data and produce a structured weekly brief.\\n\\nSummary: {{ JSON.stringify($json.summary) }}\\n\\nContent Gaps (keywords we don't rank for): {{ JSON.stringify($json.contentGaps.slice(0, 20)) }}\\n\\nKeywords by Segment: {{ JSON.stringify($json.keywordsBySegment) }}\\n\\nCompetitor Intel: {{ JSON.stringify($json.competitorIntel) }}\\n\\nProduce a JSON response with this structure:\\n{\\n  \\\"weeklyBrief\\\": {\\n    \\\"headline\\\": \\\"one-line summary\\\",\\n    \\\"topOpportunities\\\": [{ \\\"keyword\\\": \\\"\\\", \\\"segment\\\": \\\"\\\", \\\"reason\\\": \\\"\\\", \\\"suggestedTitle\\\": \\\"\\\", \\\"estimatedDifficulty\\\": \\\"easy|medium|hard\\\" }],\\n    \\\"contentCalendar\\\": [{ \\\"week\\\": 1, \\\"title\\\": \\\"\\\", \\\"targetKeyword\\\": \\\"\\\", \\\"segment\\\": \\\"\\\", \\\"outline\\\": [\\\"\\\"] }],\\n    \\\"competitorMoves\\\": [{ \\\"competitor\\\": \\\"\\\", \\\"observation\\\": \\\"\\\", \\\"action\\\": \\\"\\\" }],\\n    \\\"quickWins\\\": [\\\"actionable item\\\"],\\n    \\\"rankingChanges\\\": { \\\"improved\\\": [], \\\"declined\\\": [], \\\"newRankings\\\": [] }\\n  }\\n}\\n\\nRespond with ONLY valid JSON, no markdown.\"\n    }\n  ]\n}"
+      },
+      "id": "claude-analysis",
+      "name": "Claude: Analyze & Strategize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CLAUDE_CREDENTIAL_ID",
+          "name": "Claude API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response and structure the final output\nconst claudeResponse = $input.first().json;\nconst reportData = $('Merge & Build Report').first().json;\n\nlet analysis;\ntry {\n  const content = claudeResponse.content?.[0]?.text || '{}';\n  // Strip markdown fences if present\n  const clean = content.replace(/```json|```/g, '').trim();\n  analysis = JSON.parse(clean);\n} catch (e) {\n  analysis = {\n    weeklyBrief: {\n      headline: 'Analysis parsing failed - review raw data',\n      topOpportunities: [],\n      contentCalendar: [],\n      competitorMoves: [],\n      quickWins: ['Review raw keyword data manually'],\n      error: e.message\n    }\n  };\n}\n\nconst finalReport = {\n  ...reportData,\n  analysis: analysis.weeklyBrief || analysis,\n  generatedAt: new Date().toISOString()\n};\n\nreturn [{ json: finalReport }];"
+      },
+      "id": "format-output",
+      "name": "Format Final Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Keyword Tracker"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "google-sheets-keywords",
+      "name": "Save to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1760, -100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#seo-reports",
+        "text": "=🔥 *Weekly SEO Report - {{ $json.runDate }}*\n\n📊 *Summary:*\n• Keywords analyzed: {{ $json.summary.totalKeywordsAnalyzed }}\n• Currently ranking: {{ $json.summary.keywordsRanking }}\n• Content gaps found: {{ $json.summary.highOpportunity }}\n• Competitors analyzed: {{ $json.summary.competitorsAnalyzed }}\n\n🎯 *Top Opportunities:*\n{{ $json.analysis.topOpportunities ? $json.analysis.topOpportunities.slice(0, 5).map(o => `• *${o.keyword}* (${o.segment}) — ${o.suggestedTitle}`).join('\\n') : 'See full report' }}\n\n⚡ *Quick Wins:*\n{{ $json.analysis.quickWins ? $json.analysis.quickWins.slice(0, 3).map(q => `• ${q}`).join('\\n') : 'See full report' }}\n\n📝 *Content Calendar:*\n{{ $json.analysis.contentCalendar ? $json.analysis.contentCalendar.slice(0, 3).map(c => `• Week ${c.week}: ${c.title} → ${c.targetKeyword}`).join('\\n') : 'See full report' }}\n\n_Full report in Google Sheets_",
+        "otherOptions": {}
+      },
+      "id": "slack-notification",
+      "name": "Slack: Weekly Brief",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1760, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $credentials.httpHeaderAuth.value }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 8000,\n  \"system\": \"You are an expert SEO content writer for Plu, a fintech neobank helping immigrants build credit in 6 months. Write in a warm, authoritative, empathetic tone. Use real data and statistics. Include internal links to app.getplu.com. Target 1500-2000 words. Output clean markdown.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a blog post for getplu.com based on this brief:\\n\\nTarget keyword: {{ $json.analysis.contentCalendar[0].targetKeyword }}\\nTitle: {{ $json.analysis.contentCalendar[0].title }}\\nSegment: {{ $json.analysis.contentCalendar[0].segment }}\\nOutline: {{ JSON.stringify($json.analysis.contentCalendar[0].outline) }}\\n\\nCompetitor context: {{ JSON.stringify($json.competitorIntel.slice(0, 3)) }}\\n\\nRequirements:\\n1. SEO-optimized with target keyword in H1, first paragraph, and 3-5 H2s\\n2. Include a clear CTA to sign up at app.getplu.com\\n3. Reference Plu's key features: 6-month credit building, zero FX fees, virtual card qualification\\n4. Write for the target immigrant segment with cultural sensitivity\\n5. Include FAQ section with 3-4 questions (for featured snippets)\\n6. End with related reading links to other getplu.com pages\"\n    }\n  ]\n}"
+      },
+      "id": "claude-blog-writer",
+      "name": "Claude: Write Blog Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CLAUDE_CREDENTIAL_ID",
+          "name": "Claude API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract blog post and prepare for review queue\nconst response = $input.first().json;\nconst reportData = $('Format Final Report').first().json;\n\nconst blogContent = response.content?.[0]?.text || 'Blog generation failed';\nconst calendarEntry = reportData.analysis?.contentCalendar?.[0] || {};\n\nreturn [{\n  json: {\n    status: 'DRAFT',\n    title: calendarEntry.title || 'Untitled',\n    targetKeyword: calendarEntry.targetKeyword || '',\n    segment: calendarEntry.segment || '',\n    content: blogContent,\n    wordCount: blogContent.split(/\\s+/).length,\n    generatedAt: new Date().toISOString(),\n    runId: reportData.runId,\n    reviewUrl: 'AIRTABLE_OR_NOTION_LINK'\n  }\n}];"
+      },
+      "id": "prepare-blog-draft",
+      "name": "Prepare Blog Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 0]
+    }
+  ],
+  "connections": {
+    "Weekly Sunday 10PM": {
+      "main": [
+        [{ "node": "Load Config & Keywords", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Config & Keywords": {
+      "main": [
+        [
+          { "node": "Split Keywords", "type": "main", "index": 0 },
+          { "node": "Split Competitors", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Split Keywords": {
+      "main": [
+        [{ "node": "Firecrawl: Search Keywords", "type": "main", "index": 0 }]
+      ]
+    },
+    "Firecrawl: Search Keywords": {
+      "main": [
+        [{ "node": "Process Search Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Competitors": {
+      "main": [
+        [{ "node": "Firecrawl: Crawl Competitor Blogs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Firecrawl: Crawl Competitor Blogs": {
+      "main": [
+        [{ "node": "Process Competitor Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Search Results": {
+      "main": [
+        [{ "node": "Merge & Build Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Competitor Data": {
+      "main": [
+        [{ "node": "Merge & Build Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Merge & Build Report": {
+      "main": [
+        [{ "node": "Claude: Analyze & Strategize", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude: Analyze & Strategize": {
+      "main": [
+        [{ "node": "Format Final Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Final Report": {
+      "main": [
+        [
+          { "node": "Save to Google Sheets", "type": "main", "index": 0 },
+          { "node": "Slack: Weekly Brief", "type": "main", "index": 0 },
+          { "node": "Claude: Write Blog Post", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Claude: Write Blog Post": {
+      "main": [
+        [{ "node": "Prepare Blog Draft", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": [
+    { "name": "SEO", "id": "seo-tag" },
+    { "name": "Automation", "id": "auto-tag" },
+    { "name": "Content", "id": "content-tag" }
+  ]
+}

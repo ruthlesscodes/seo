@@ -1,0 +1,35 @@
+{
+  "name": "seo-agent-service",
+  "version": "1.0.0",
+  "description": "AI-powered SEO keyword scraping, competitor analysis, and content generation agent",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "scrape": "node src/jobs/weeklyKeywordScrape.js",
+    "analyze": "node src/jobs/competitorAnalysis.js",
+    "generate": "node src/jobs/blogGeneration.js",
+    "track": "node src/jobs/rankTracker.js",
+    "full-pipeline": "node src/jobs/fullPipeline.js",
+    "db:push": "npx prisma db push",
+    "db:generate": "npx prisma generate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@prisma/client": "^6.0.0",
+    "bull": "^4.12.0",
+    "cors": "^2.8.5",
+    "cron": "^3.1.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.0.0",
+    "firecrawl": "^1.0.0",
+    "ioredis": "^5.4.0",
+    "node-cron": "^3.0.3",
+    "pino": "^9.0.0",
+    "stripe": "^17.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.0.0"
+  }
+}

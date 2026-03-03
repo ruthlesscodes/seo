@@ -2,6 +2,7 @@ const { z } = require('zod');
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
 const firecrawl = require('../services/firecrawl');
 const { prisma } = require('../utils/prisma');
+const { deliverWebhook } = require('../utils/webhookDelivery');
 const schemas = require('../schemas/requests');
 const fcSchemas = require('../schemas/firecrawl');
 
@@ -125,6 +126,13 @@ async function monitorRoutes(fastify) {
               }
             });
             changes.push({ url, changeStatus, eventId: event.id });
+            deliverWebhook(request.org.id, 'monitor.changed', {
+              url,
+              label: monitored.label,
+              changeStatus,
+              eventId: event.id,
+              detectedAt: new Date()
+            }).catch((e) => request.log.warn({ err: e }, 'Webhook delivery failed'));
           }
         } catch (e) {
           request.log.warn({ url, err: e }, 'Monitor check failed for URL');

@@ -7,6 +7,8 @@ const { usageMiddleware } = require('./middleware/usage');
 const { prisma } = require('./utils/prisma');
 const { redis } = require('./utils/redis');
 const { registerPluOrg } = require('./utils/bootstrap');
+const { startScheduler } = require('./jobs/scheduler');
+const { worker } = require('./jobs/pipelineWorker');
 
 const fastify = Fastify({
   logger: {
@@ -69,6 +71,9 @@ const start = async () => {
     const pluApiKey = await registerPluOrg(prisma);
     console.log(`\n🔑 Plu API key: ${pluApiKey}\n`);
 
+    startScheduler(fastify.log);
+    console.log('✅ Scheduler + pipeline worker started');
+
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`🔥 SEO Agent API v2 — port ${PORT}`);
     console.log(`   GET  /health — status`);
@@ -82,6 +87,7 @@ const start = async () => {
 
 // Graceful shutdown
 const shutdown = async () => {
+  await worker.close();
   await fastify.close();
   await prisma.$disconnect();
   await redis.quit();

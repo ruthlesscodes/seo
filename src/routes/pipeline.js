@@ -1,12 +1,16 @@
+const { Queue } = require('bullmq');
 const { checkCredits, consumeCredits } = require('../utils/credits');
 const { prisma } = require('../utils/prisma');
+const { redis } = require('../utils/redis');
 const schemas = require('../schemas/requests');
+
+const pipelineQueue = new Queue('pipeline', { connection: redis });
 
 async function pipelineRoutes(fastify) {
 
   // POST /api/pipeline/run — full async pipeline
   // Body: { domain: string, keywords: string[], competitors?: string[], region?: string }
-  // Creates ScrapeRun record. BullMQ worker would process (not implemented here per CURSOR - worker in src/jobs/)
+  // Creates ScrapeRun + BullMQ job; worker processes search → crawl → analyze → generate
   fastify.post('/run', async (request, reply) => {
     try {
       const body = schemas.PipelineRunBody.parse(request.body);
@@ -28,6 +32,8 @@ async function pipelineRoutes(fastify) {
           }
         }
       });
+
+      await pipelineQueue.add('pipeline', { scrapeRunId: scrapeRun.id });
 
       consumeCredits(request, 'pipeline.full', cost);
 

@@ -3,6 +3,7 @@ const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
+const { deliverWebhook } = require('../utils/webhookDelivery');
 const schemas = require('../schemas/requests');
 const fcSchemas = require('../schemas/firecrawl');
 
@@ -103,6 +104,13 @@ async function auditRoutes(fastify) {
       });
 
       consumeCredits(request, 'audit.technical', creditCost);
+
+      deliverWebhook(request.org.id, 'audit.completed', {
+        auditRunId: auditRun.id,
+        domain,
+        score: avgScore,
+        issuesFound
+      }).catch((e) => request.log.warn({ err: e }, 'Webhook delivery failed'));
 
       return {
         success: true,

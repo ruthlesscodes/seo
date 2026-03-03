@@ -222,7 +222,7 @@ async function intelligenceRoutes(fastify) {
       const agentRes = await firecrawl.agent(body.topic, { model, maxCredits: 50 });
 
       const agentId = agentRes.id || agentRes.data?.id;
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < 60; i++) {
         await new Promise(r => setTimeout(r, 2000));
         const status = await firecrawl.getAgentStatus(agentId);
         const s = status.status || status.data?.status;

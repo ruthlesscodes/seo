@@ -16,7 +16,14 @@ const fastify = Fastify({
   }
 });
 
-const PORT = process.env.PORT || 4200;
+const PORT = Number(process.env.PORT) || 3000;
+
+// ============================================
+// HEALTH (no auth, no DB — must be first so healthcheck always succeeds)
+// ============================================
+fastify.get('/health', async (_request, reply) => {
+  return reply.status(200).send({ status: 'ok' });
+});
 
 // ============================================
 // PLUGINS
@@ -28,7 +35,6 @@ fastify.register(cors, { origin: true });
 // ============================================
 fastify.decorate('prisma', prisma);
 fastify.decorate('redis', redis);
-
 // ============================================
 // GLOBAL HOOKS
 // ============================================
@@ -62,26 +68,23 @@ fastify.register(require('./routes/billing'),       { prefix: '/api/billing' });
 const CONNECT_TIMEOUT = 10000; // 10s
 
 const start = async () => {
+  // Connect to DB and Redis when available; never block or crash server so /health can always respond
   try {
-    // Ensure DB connection (with timeout)
     await Promise.race([
       prisma.$connect(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Database connection timeout')), CONNECT_TIMEOUT))
     ]);
     console.log('✅ Database connected');
 
-    // Ensure Redis connection (with timeout)
     await Promise.race([
       redis.ping(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Redis connection timeout')), CONNECT_TIMEOUT))
     ]);
     console.log('✅ Redis connected');
 
-    // Register Plu as internal Enterprise org
     const pluApiKey = await registerPluOrg(prisma);
     console.log(`\n🔑 Plu API key: ${pluApiKey}\n`);
 
-    // Start background jobs (non-blocking; failures don't prevent server start)
     try {
       const { startScheduler } = require('./jobs/scheduler');
       const { worker: w } = require('./jobs/pipelineWorker');
@@ -91,7 +94,11 @@ const start = async () => {
     } catch (e) {
       console.warn('⚠️ Background jobs failed to start:', e.message);
     }
+  } catch (err) {
+    fastify.log.warn({ err: err.message }, 'DB/Redis not available; server starting anyway (GET /health will still respond)');
+  }
 
+  try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
     console.log(`🔥 SEO Agent API v2 — port ${PORT}`);
     console.log(`   GET  /health — status`);

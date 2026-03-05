@@ -63,12 +63,11 @@ fastify.register(require('./routes/webhooks'),      { prefix: '/api/webhooks' })
 fastify.register(require('./routes/billing'),       { prefix: '/api/billing' });
 
 // ============================================
-// START
+// START — listen first, DB/Redis after (so /health succeeds immediately)
 // ============================================
 const CONNECT_TIMEOUT = 10000; // 10s
 
-const start = async () => {
-  // Connect to DB and Redis when available; never block or crash server so /health can always respond
+async function connectDatabase() {
   try {
     await Promise.race([
       prisma.$connect(),
@@ -95,12 +94,17 @@ const start = async () => {
       console.warn('⚠️ Background jobs failed to start:', e.message);
     }
   } catch (err) {
-    fastify.log.warn({ err: err.message }, 'DB/Redis not available; server starting anyway (GET /health will still respond)');
+    fastify.log.warn({ err: err.message }, 'DB/Redis not available; server stays up (GET /health works)');
   }
+}
 
+const start = async () => {
+  await fastify.ready();
+
+  console.log('[start] Binding server to port', PORT, '(0.0.0.0)...');
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    console.log(`🔥 SEO Agent API v2 — port ${PORT}`);
+    console.log('[start] Server listening on port', PORT);
     console.log(`   GET  /health — status`);
     console.log(`   GET  /docs   — API reference`);
     console.log(`   POST /api/auth/register — get started\n`);
@@ -108,6 +112,8 @@ const start = async () => {
     fastify.log.error(err);
     process.exit(1);
   }
+
+  setImmediate(connectDatabase);
 };
 
 // Graceful shutdown

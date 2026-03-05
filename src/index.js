@@ -35,8 +35,9 @@ fastify.register(cors, { origin: true });
 // ============================================
 fastify.decorate('prisma', prisma);
 fastify.decorate('redis', redis);
+
 // ============================================
-// GLOBAL HOOKS
+// GLOBAL HOOKS (PUBLIC_PATHS like /health skip auth/rateLimit/usage)
 // ============================================
 fastify.addHook('onRequest', authMiddleware);
 fastify.addHook('onRequest', rateLimitMiddleware);

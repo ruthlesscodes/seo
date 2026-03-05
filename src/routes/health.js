@@ -1,10 +1,5 @@
 async function healthRoutes(fastify) {
-  fastify.get('/health', async () => ({
-    status: 'ok',
-    version: '2.0.0',
-    timestamp: new Date().toISOString()
-  }));
-
+  // /health is registered in index.js first (no auth, no DB) for healthcheck; do not duplicate here
   fastify.get('/docs', async () => ({
     name: 'SEO Agent API',
     version: '2.0.0',

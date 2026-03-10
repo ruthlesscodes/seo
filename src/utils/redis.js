@@ -1,11 +1,22 @@
 const Redis = require('ioredis');
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+
+const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: 3,
   retryStrategy: (times) => Math.min(times * 200, 5000),
-  lazyConnect: true // do not connect on require; connect on first use so server can listen immediately
+  lazyConnect: true
 });
 
 redis.on('error', (err) => console.error('Redis error:', err.message));
 
-module.exports = { redis };
+// BullMQ requires maxRetriesPerRequest: null for blocking commands (BLPOP etc)
+const redisBullmq = new Redis(redisUrl, {
+  maxRetriesPerRequest: null,
+  retryStrategy: (times) => Math.min(times * 200, 5000),
+  lazyConnect: true
+});
+
+redisBullmq.on('error', (err) => console.error('Redis (BullMQ) error:', err.message));
+
+module.exports = { redis, redisBullmq };

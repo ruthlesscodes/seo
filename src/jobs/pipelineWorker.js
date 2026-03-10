@@ -6,7 +6,7 @@
 
 require('dotenv').config();
 const { Worker } = require('bullmq');
-const { redis } = require('../utils/redis');
+const { redisBullmq } = require('../utils/redis');
 const { prisma } = require('../utils/prisma');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
@@ -162,7 +162,7 @@ async function processPipelineJob(job) {
 const worker = new Worker(
   QUEUE_NAME,
   async (job) => processPipelineJob(job),
-  { connection: redis }
+  { connection: redisBullmq }
 );
 
 worker.on('completed', (job) => console.log(`Pipeline job ${job.id} completed`));

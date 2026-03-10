@@ -1,10 +1,10 @@
 const { Queue } = require('bullmq');
 const { checkCredits, consumeCredits } = require('../utils/credits');
 const { prisma } = require('../utils/prisma');
-const { redis } = require('../utils/redis');
+const { redisBullmq } = require('../utils/redis');
 const schemas = require('../schemas/requests');
 
-const pipelineQueue = new Queue('pipeline', { connection: redis });
+const pipelineQueue = new Queue('pipeline', { connection: redisBullmq });
 
 async function pipelineRoutes(fastify) {
 

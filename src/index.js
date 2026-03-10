@@ -57,8 +57,7 @@ fastify.addHook('onRequest', rateLimitMiddleware);
 fastify.addHook('onResponse', usageMiddleware);
 
 // ============================================
-// PHASED STARTUP — listen with /health FIRST, then load routes
-// Ensures healthcheck passes before heavy route loading
+// STARTUP — load routes BEFORE listen (Fastify disallows register after boot)
 // ============================================
 const CONNECT_TIMEOUT = 10000; // 10s
 
@@ -114,25 +113,20 @@ async function loadAllRoutes() {
 
 const start = async () => {
   try {
+    await loadAllRoutes();
     await fastify.ready();
     console.log('[start] Binding server to port', PORT, '(0.0.0.0)...');
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
     console.log('[start] Server listening — / and /health ready');
-  } catch (err) {
-    console.error('[start] Listen failed:', err);
-    process.exit(1);
-  }
-
-  loadAllRoutes().then(() => {
     console.log('[start] All routes loaded');
     console.log(`   GET  /health — status`);
     console.log(`   GET  /docs   — API reference`);
     console.log(`   POST /api/auth/register — get started\n`);
     setImmediate(connectDatabase);
-  }).catch((err) => {
-    console.error('[start] Route loading failed:', err);
+  } catch (err) {
+    console.error('[start] Failed:', err);
     process.exit(1);
-  });
+  }
 };
 
 // Graceful shutdown

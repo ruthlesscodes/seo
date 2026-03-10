@@ -16,7 +16,7 @@ const fastify = Fastify({
   }
 });
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 4200;
 
 // ============================================
 // HEALTH (no auth, no DB — must be first so healthcheck always succeeds)

@@ -24,10 +24,15 @@
 const BASE_URL = process.env.FIRECRAWL_BASE_URL || 'https://api.firecrawl.dev/v2';
 const API_KEY = process.env.FIRECRAWL_API_KEY;
 
-async function firecrawlRequest(endpoint, body = {}, method = 'POST') {
+const FIRECRAWL_TIMEOUT_MS = Number(process.env.FIRECRAWL_TIMEOUT_MS) || 90000;
+
+async function firecrawlRequest(endpoint, body = {}, method = 'POST', timeoutMs = FIRECRAWL_TIMEOUT_MS) {
   const url = `${BASE_URL}${endpoint}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const options = {
     method,
+    signal: controller.signal,
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
       'Content-Type': 'application/json'
@@ -35,7 +40,19 @@ async function firecrawlRequest(endpoint, body = {}, method = 'POST') {
   };
   if (method !== 'GET') options.body = JSON.stringify(body);
 
-  const res = await fetch(url, options);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') {
+      const err = new Error(`Firecrawl request timed out after ${timeoutMs}ms`);
+      err.status = 504;
+      throw err;
+    }
+    throw e;
+  }
+  clearTimeout(timeout);
   const data = await res.json();
 
   if (!res.ok || data.success === false) {

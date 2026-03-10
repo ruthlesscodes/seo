@@ -1,7 +1,11 @@
 /**
  * node-cron scheduled jobs
- * - Monitor checks based on MonitoredUrl.checkFrequency (HOURLY, DAILY, WEEKLY, MONTHLY)
- * - Daily decay check for ranking drops
+ *
+ * Schedule:
+ *   Every hour    — HOURLY monitor checks
+ *   Daily 2 AM    — DAILY monitor checks + decay + DeerFlow agent audits + GSC alerts
+ *   Weekly Sun    — WEEKLY monitor checks
+ *   Monthly 1st   — MONTHLY monitor checks
  */
 
 const cron = require('node-cron');
@@ -19,14 +23,14 @@ function isDueForCheck(monitored, frequency) {
     HOURLY: 60 * 60 * 1000,
     DAILY: 24 * 60 * 60 * 1000,
     WEEKLY: 7 * 24 * 60 * 60 * 1000,
-    MONTHLY: 30 * 24 * 60 * 60 * 1000
+    MONTHLY: 30 * 24 * 60 * 60 * 1000,
   };
   return msSince >= (thresholds[frequency] || thresholds.DAILY);
 }
 
 async function runMonitorChecks(frequency) {
   const urls = await prisma.monitoredUrl.findMany({
-    where: { isActive: true, checkFrequency: frequency }
+    where: { isActive: true, checkFrequency: frequency },
   });
   const due = urls.filter((u) => isDueForCheck(u, frequency));
   for (const monitored of due) {
@@ -38,14 +42,17 @@ async function runMonitorChecks(frequency) {
       const result = await firecrawl.scrape(monitored.url, {
         formats: ['markdown'],
         changeTrackingModes: ['git-diff'],
-        changeTrackingTag: `org_${monitored.orgId}`
+        changeTrackingTag: `org_${monitored.orgId}`,
       });
       const ct = result.data?.changeTracking || result.changeTracking;
       const changeStatus = ct?.changeStatus || 'unchanged';
 
       await prisma.monitoredUrl.update({
         where: { id: monitored.id },
-        data: { lastCheckedAt: new Date(), ...(changeStatus !== 'unchanged' ? { lastChangeAt: new Date() } : {}) }
+        data: {
+          lastCheckedAt: new Date(),
+          ...(changeStatus !== 'unchanged' ? { lastChangeAt: new Date() } : {}),
+        },
       });
 
       if (changeStatus === 'changed' || changeStatus === 'new') {
@@ -54,14 +61,14 @@ async function runMonitorChecks(frequency) {
             monitoredUrlId: monitored.id,
             changeStatus,
             changeType: 'content',
-            diff: ct?.diff || null
-          }
+            diff: ct?.diff || null,
+          },
         });
         await deliverWebhook(monitored.orgId, 'monitor.changed', {
           url: monitored.url,
           label: monitored.label,
           changeStatus,
-          detectedAt: new Date()
+          detectedAt: new Date(),
         });
       }
     } catch (e) {
@@ -72,7 +79,7 @@ async function runMonitorChecks(frequency) {
 
 async function runDecayCheck() {
   const orgs = await prisma.organization.findMany({
-    where: { plan: { in: ['GROWTH', 'SCALE', 'ENTERPRISE'] } }
+    where: { plan: { in: ['GROWTH', 'SCALE', 'ENTERPRISE'] } },
   });
   for (const org of orgs) {
     const limits = PLAN_LIMITS[org.plan] || {};
@@ -86,14 +93,11 @@ async function runDecayCheck() {
 
       for (const kw of keywords) {
         const [currentSnap, oldSnap] = await Promise.all([
-          prisma.rankSnapshot.findFirst({
-            where: { keywordId: kw.id },
-            orderBy: { checkedAt: 'desc' }
-          }),
+          prisma.rankSnapshot.findFirst({ where: { keywordId: kw.id }, orderBy: { checkedAt: 'desc' } }),
           prisma.rankSnapshot.findFirst({
             where: { keywordId: kw.id, checkedAt: { lte: weekAgo } },
-            orderBy: { checkedAt: 'desc' }
-          })
+            orderBy: { checkedAt: 'desc' },
+          }),
         ]);
         if (!currentSnap || !oldSnap) continue;
         const prevPos = oldSnap.position;
@@ -104,7 +108,7 @@ async function runDecayCheck() {
             previousPosition: prevPos,
             currentPosition: currPos,
             drop: currPos - prevPos,
-            url: currentSnap.url
+            url: currentSnap.url,
           });
         }
       }
@@ -113,12 +117,64 @@ async function runDecayCheck() {
         await deliverWebhook(org.id, 'ranking.dropped', {
           decaying,
           domain: org.domain,
-          detectedAt: new Date()
+          detectedAt: new Date(),
         });
       }
     } catch (e) {
       console.error(`Decay check failed for org ${org.id}:`, e.message);
     }
+  }
+}
+
+async function runDailyAgentAudits(log) {
+  if (!process.env.DEERFLOW_URL && !process.env.DEERFLOW_GATEWAY_URL) {
+    log.warn('Skipping daily agent audits: DEERFLOW_URL not configured');
+    return;
+  }
+
+  try {
+    const { runDailyAuditsForAllOrgs } = require('../services/deerflow');
+    log.info('Scheduler: starting daily DeerFlow agent audits');
+    const results = await runDailyAuditsForAllOrgs();
+    log.info({ results }, 'Scheduler: daily DeerFlow agent audits complete');
+  } catch (err) {
+    log.error({ err: err.message }, 'Scheduler: daily DeerFlow agent audits failed');
+  }
+}
+
+async function runDailyGSCAlerts(log) {
+  try {
+    const { detectRankingDrops } = require('../services/searchConsole');
+
+    const gscTokens = await prisma.orgGSCToken?.findMany?.({
+      include: { org: true },
+    }).catch(() => []);
+
+    for (const token of gscTokens) {
+      try {
+        const siteUrl = token.org.domain.startsWith('http')
+          ? token.org.domain
+          : `https://${token.org.domain}`;
+
+        const drops = await detectRankingDrops(
+          { accessToken: token.accessToken, refreshToken: token.refreshToken },
+          siteUrl
+        );
+
+        if (drops.length > 0) {
+          await deliverWebhook(token.orgId, 'ranking.dropped', {
+            source: 'google_search_console',
+            drops,
+            domain: token.org.domain,
+            detectedAt: new Date(),
+          });
+        }
+      } catch (err) {
+        log.warn({ orgId: token.orgId, err: err.message }, 'GSC alert failed for org');
+      }
+    }
+  } catch (err) {
+    log.warn({ err: err.message }, 'Daily GSC alerts failed');
   }
 }
 
@@ -130,10 +186,12 @@ function startScheduler(logger) {
     runMonitorChecks('HOURLY').catch((e) => log.error(e));
   });
 
-  cron.schedule('0 0 * * *', () => {
-    log.debug('Scheduler: running DAILY monitor checks and decay');
+  cron.schedule('0 2 * * *', () => {
+    log.debug('Scheduler: running DAILY jobs');
     runMonitorChecks('DAILY').catch((e) => log.error(e));
     runDecayCheck().catch((e) => log.error(e));
+    runDailyAgentAudits(log).catch((e) => log.error(e));
+    runDailyGSCAlerts(log).catch((e) => log.error(e));
   });
 
   cron.schedule('0 0 * * 0', () => {
@@ -146,7 +204,7 @@ function startScheduler(logger) {
     runMonitorChecks('MONTHLY').catch((e) => log.error(e));
   });
 
-  log.info('Scheduler started (hourly, daily, weekly, monthly)');
+  log.info('Scheduler started (hourly, daily [+agent audits +GSC alerts], weekly, monthly)');
 }
 
-module.exports = { startScheduler, runMonitorChecks, runDecayCheck };
+module.exports = { startScheduler, runMonitorChecks, runDecayCheck, runDailyAgentAudits };

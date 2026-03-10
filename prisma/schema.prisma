@@ -29,10 +29,12 @@ model Organization {
   blogDrafts      BlogDraft[]
   scrapeRuns      ScrapeRun[]
   monitoredUrls   MonitoredUrl[]
-  auditRuns       AuditRun[]
-  geoReports      GeoReport[]
-  usageLogs       UsageLog[]
-  webhookConfigs  WebhookConfig[]
+  auditRuns         AuditRun[]
+  geoReports        GeoReport[]
+  usageLogs         UsageLog[]
+  webhookConfigs    WebhookConfig[]
+  lighthouseReports LighthouseReport[]
+  gscToken          OrgGSCToken?
 }
 
 model User {
@@ -381,4 +383,40 @@ enum GeoReportType {
   BRAND_MONITOR
   LLMSTXT
   CITATION_OPTIMIZATION
+}
+
+// ============================================
+// LIGHTHOUSE + GSC
+// ============================================
+
+model LighthouseReport {
+  id                   String   @id @default(cuid())
+  orgId                String
+  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url                  String
+  performanceScore     Int?
+  seoScore             Int?
+  accessibilityScore   Int?
+  bestPracticesScore   Int?
+  lcpMs                Int?
+  clsScore             Float?
+  fcpMs                Int?
+  ttfbMs               Int?
+  tbtMs                Int?
+  rawData              Json?
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, url, createdAt])
+}
+
+model OrgGSCToken {
+  id           String   @id @default(cuid())
+  orgId        String   @unique
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  siteUrl      String
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  expiryDate   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

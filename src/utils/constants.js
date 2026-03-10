@@ -1,6 +1,41 @@
-// ============================================
-// Plan Limits
-// ============================================
+/**
+ * Constants — Plan Limits + Credit Costs
+ *
+ * Plan features are CUMULATIVE. Each plan inherits lower-tier features.
+ * Added: audit.lighthouse, audit.agent, gsc.connect.
+ */
+
+const FREE_FEATURES = ['search', 'track', 'map', 'sitemap'];
+
+const STARTER_FEATURES = [
+  ...FREE_FEATURES,
+  'crawl', 'analyze', 'blog',
+  'screenshot', 'news',
+  'audit.technical', 'audit.lighthouse',
+  'monitor.check', 'monitor.diff',
+];
+
+const GROWTH_FEATURES = [
+  ...STARTER_FEATURES,
+  'cluster', 'refresh', 'pipeline',
+  'audit.batch', 'audit.internal-links',
+  'monitor.pricing', 'monitor.decay',
+  'rankings.global', 'rankings.serp-features',
+  'trending', 'brand.mentions',
+  'geo.readability', 'geo.llmstxt',
+];
+
+const SCALE_FEATURES = [
+  ...GROWTH_FEATURES,
+  'agent', 'audit.agent',
+  'intelligence.agent', 'intelligence.batch',
+  'webhooks', 'actions',
+  'geo.brand-monitor', 'geo.optimize',
+  'competitors.brand', 'brand.images',
+  'domain.structure',
+  'serp-snapshot',
+];
+
 const PLAN_LIMITS = {
   FREE: {
     price: 0,
@@ -10,7 +45,7 @@ const PLAN_LIMITS = {
     maxCompetitors: 2,
     maxMonitoredURLs: 3,
     regions: 1,
-    features: ['search', 'track', 'map', 'sitemap']
+    features: FREE_FEATURES,
   },
   STARTER: {
     price: 48,
@@ -20,11 +55,7 @@ const PLAN_LIMITS = {
     maxCompetitors: 5,
     maxMonitoredURLs: 20,
     regions: 3,
-    features: [
-      'search', 'track', 'crawl', 'analyze', 'blog',
-      'map', 'sitemap', 'screenshot', 'news',
-      'audit.technical', 'monitor.check', 'monitor.diff'
-    ]
+    features: STARTER_FEATURES,
   },
   GROWTH: {
     price: 143,
@@ -34,14 +65,7 @@ const PLAN_LIMITS = {
     maxCompetitors: 15,
     maxMonitoredURLs: 100,
     regions: 10,
-    features: [
-      'cluster', 'refresh', 'pipeline',
-      'audit.batch', 'audit.internal-links',
-      'monitor.pricing', 'monitor.decay',
-      'rankings.global', 'rankings.serp-features',
-      'trending', 'brand.mentions',
-      'geo.readability', 'geo.llmstxt'
-    ]
+    features: GROWTH_FEATURES,
   },
   SCALE: {
     price: 449,
@@ -51,14 +75,7 @@ const PLAN_LIMITS = {
     maxCompetitors: 50,
     maxMonitoredURLs: 500,
     regions: 'unlimited',
-    features: [
-      'agent', 'intelligence.agent', 'intelligence.batch',
-      'webhooks', 'actions',
-      'geo.brand-monitor', 'geo.optimize',
-      'competitors.brand', 'brand.images',
-      'domain.structure',
-      'serp-snapshot'
-    ]
+    features: SCALE_FEATURES,
   },
   ENTERPRISE: {
     price: 'custom',
@@ -68,93 +85,67 @@ const PLAN_LIMITS = {
     maxCompetitors: Infinity,
     maxMonitoredURLs: Infinity,
     regions: 'unlimited',
-    features: ['*']
-  }
+    features: ['*'],
+  },
 };
 
-// ============================================
-// Credit Costs — per operation
-// ============================================
 const CREDIT_COSTS = {
-  // Keywords
-  'keyword.search':       1,
-  'keyword.search.batch': 1,   // per keyword
-  'keyword.cluster':      5,
-  'keyword.suggest':      3,
-
-  // Competitors
-  'competitor.crawl':    10,
-  'competitor.scrape':    1,
-  'competitor.compare':   8,
+  'keyword.search': 1,
+  'keyword.search.batch': 1,
+  'keyword.cluster': 5,
+  'keyword.suggest': 3,
+  'competitor.crawl': 10,
+  'competitor.scrape': 1,
+  'competitor.compare': 8,
   'competitor.scrape-interactive': 3,
-  'competitors.brand':    3,   // branding format scrape
-
-  // Content
-  'blog.generate':       15,
-  'blog.refresh':        10,
-  'content.brief':        5,
-
-  // Rankings
-  'rank.track':           1,   // per keyword
-  'rank.track.batch':     1,   // per keyword
-  'rankings.global':      3,   // per region checked
-  'rankings.serp-features': 3, // per keyword
+  'competitors.brand': 3,
+  'blog.generate': 15,
+  'blog.refresh': 10,
+  'content.brief': 5,
+  'rank.track': 1,
+  'rank.track.batch': 1,
+  'rankings.global': 3,
+  'rankings.serp-features': 3,
   'rankings.serp-snapshot': 2,
-
-  // Intelligence
-  'analyze.brief':       20,
-  'intelligence.gaps':    1,
-  'agent.research':      25,
-  'intelligence.agent':  25,   // alias
-  'intelligence.batch':  20,   // per agent in batch
-
-  // Domain
-  'domain.map':           2,
-  'domain.sitemap':       2,   // map + formatting
-  'domain.structure':     5,
-
-  // Monitoring
-  'monitor.watch':        0,   // free to register
-  'monitor.check':        2,   // per URL (scrape + changeTracking)
-  'monitor.diff':         2,
-  'monitor.pricing':      6,   // scrape + JSON extraction
-  'monitor.decay':        2,   // per keyword per check
-
-  // Audit
-  'audit.technical':      8,   // per page (scrape JSON + analysis)
-  'audit.batch':          5,   // per page in batch
-  'audit.internal-links': 15,  // crawl + analysis
-  'audit.screenshot':     2,
-
-  // Search
-  'search.news':          2,
-  'search.trending':      2,
-  'search.github':        2,
-  'search.research':      2,
-
-  // GEO / AEO
-  'geo.brand-monitor':   30,   // 5 AI platform queries + analysis
-  'geo.readability':     10,   // per page
-  'geo.llmstxt':         15,   // map + batch scrape + summaries
-  'geo.optimize':        40,   // deep research + analysis
-
-  // Brand
-  'brand.mentions':      5,    // news search + analysis
-  'brand.images':        3,
-
-  // Pipeline
-  'pipeline.full':       50
+  'analyze.brief': 20,
+  'intelligence.gaps': 1,
+  'agent.research': 25,
+  'intelligence.agent': 25,
+  'intelligence.batch': 20,
+  'domain.map': 2,
+  'domain.sitemap': 2,
+  'domain.structure': 5,
+  'monitor.watch': 0,
+  'monitor.check': 2,
+  'monitor.diff': 2,
+  'monitor.pricing': 6,
+  'monitor.decay': 2,
+  'audit.technical': 8,
+  'audit.batch': 5,
+  'audit.internal-links': 15,
+  'audit.screenshot': 2,
+  'audit.lighthouse': 3,
+  'audit.agent': 50,
+  'search.news': 2,
+  'search.trending': 2,
+  'search.github': 2,
+  'search.research': 2,
+  'geo.brand-monitor': 30,
+  'geo.readability': 10,
+  'geo.llmstxt': 15,
+  'geo.optimize': 40,
+  'brand.mentions': 5,
+  'brand.images': 3,
+  'pipeline.full': 50,
 };
 
-// ============================================
-// Public routes (skip auth)
-// ============================================
 const PUBLIC_PATHS = [
   '/health',
   '/docs',
   '/api/auth/register',
   '/api/auth/login',
-  '/api/billing/webhook'
+  '/api/billing/webhook',
+  '/api/auth/gsc/callback',
 ];
 
 module.exports = { PLAN_LIMITS, CREDIT_COSTS, PUBLIC_PATHS };

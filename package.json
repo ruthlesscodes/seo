@@ -23,6 +23,7 @@
     "@fastify/swagger-ui": "^4.1.0",
     "@prisma/client": "^6.3.0",
     "bullmq": "^5.25.0",
+    "googleapis": "^144.0.0",
     "dotenv": "^16.4.7",
     "fastify": "^4.28.0",
     "ioredis": "^5.4.2",

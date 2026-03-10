@@ -140,6 +140,7 @@ const CREDIT_COSTS = {
 };
 
 const PUBLIC_PATHS = [
+  '/',
   '/health',
   '/docs',
   '/api/auth/register',

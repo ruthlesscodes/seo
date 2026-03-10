@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  process.exit(1);
+});
+
 const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const { authMiddleware } = require('./middleware/auth');
@@ -20,9 +29,13 @@ const PORT = Number(process.env.PORT) || 4200;
 
 // ============================================
 // HEALTH (no auth, no DB — must be first so healthcheck always succeeds)
+// Some platforms check GET / — provide both
 // ============================================
 fastify.get('/health', async (_request, reply) => {
   return reply.status(200).send({ status: 'ok' });
+});
+fastify.get('/', async (_request, reply) => {
+  return reply.status(200).send({ status: 'ok', message: 'SEO Agent API — see /docs' });
 });
 
 // ============================================
@@ -87,12 +100,12 @@ async function connectDatabase() {
 
     try {
       const { startScheduler } = require('./jobs/scheduler');
-      const { worker: w } = require('./jobs/pipelineWorker');
-      worker = w;
+      const pw = require('./jobs/pipelineWorker');
+      worker = pw.worker;
       startScheduler(fastify.log);
       console.log('✅ Scheduler + pipeline worker started');
     } catch (e) {
-      console.warn('⚠️ Background jobs failed to start:', e.message);
+      console.warn('⚠️ Background jobs failed to start:', e.message, e.stack);
     }
   } catch (err) {
     fastify.log.warn({ err: err.message }, 'DB/Redis not available; server stays up (GET /health works)');

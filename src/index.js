@@ -57,27 +57,8 @@ fastify.addHook('onRequest', rateLimitMiddleware);
 fastify.addHook('onResponse', usageMiddleware);
 
 // ============================================
-// ROUTES — each file exports a fastify plugin
-// ============================================
-fastify.register(require('./routes/health'),       { prefix: '/' });
-fastify.register(require('./routes/auth'),          { prefix: '/api/auth' });
-fastify.register(require('./routes/keywords'),      { prefix: '/api/keywords' });
-fastify.register(require('./routes/competitors'),   { prefix: '/api/competitors' });
-fastify.register(require('./routes/content'),       { prefix: '/api/content' });
-fastify.register(require('./routes/rankings'),      { prefix: '/api/rankings' });
-fastify.register(require('./routes/search'),        { prefix: '/api/search' });
-fastify.register(require('./routes/brand'),         { prefix: '/api/brand' });
-fastify.register(require('./routes/intelligence'),  { prefix: '/api/intelligence' });
-fastify.register(require('./routes/domain'),        { prefix: '/api/domain' });
-fastify.register(require('./routes/monitor'),       { prefix: '/api/monitor' });
-fastify.register(require('./routes/audit'),         { prefix: '/api/audit' });
-fastify.register(require('./routes/geo'),           { prefix: '/api/geo' });
-fastify.register(require('./routes/pipeline'),      { prefix: '/api/pipeline' });
-fastify.register(require('./routes/webhooks'),      { prefix: '/api/webhooks' });
-fastify.register(require('./routes/billing'),       { prefix: '/api/billing' });
-
-// ============================================
-// START — listen first, DB/Redis after (so /health succeeds immediately)
+// PHASED STARTUP — listen with /health FIRST, then load routes
+// Ensures healthcheck passes before heavy route loading
 // ============================================
 const CONNECT_TIMEOUT = 10000; // 10s
 
@@ -112,22 +93,46 @@ async function connectDatabase() {
   }
 }
 
-const start = async () => {
-  await fastify.ready();
+async function loadAllRoutes() {
+  await fastify.register(require('./routes/health'),       { prefix: '/' });
+  await fastify.register(require('./routes/auth'),          { prefix: '/api/auth' });
+  await fastify.register(require('./routes/keywords'),      { prefix: '/api/keywords' });
+  await fastify.register(require('./routes/competitors'),   { prefix: '/api/competitors' });
+  await fastify.register(require('./routes/content'),       { prefix: '/api/content' });
+  await fastify.register(require('./routes/rankings'),      { prefix: '/api/rankings' });
+  await fastify.register(require('./routes/search'),        { prefix: '/api/search' });
+  await fastify.register(require('./routes/brand'),         { prefix: '/api/brand' });
+  await fastify.register(require('./routes/intelligence'),  { prefix: '/api/intelligence' });
+  await fastify.register(require('./routes/domain'),        { prefix: '/api/domain' });
+  await fastify.register(require('./routes/monitor'),       { prefix: '/api/monitor' });
+  await fastify.register(require('./routes/audit'),         { prefix: '/api/audit' });
+  await fastify.register(require('./routes/geo'),           { prefix: '/api/geo' });
+  await fastify.register(require('./routes/pipeline'),      { prefix: '/api/pipeline' });
+  await fastify.register(require('./routes/webhooks'),      { prefix: '/api/webhooks' });
+  await fastify.register(require('./routes/billing'),       { prefix: '/api/billing' });
+}
 
-  console.log('[start] Binding server to port', PORT, '(0.0.0.0)...');
+const start = async () => {
   try {
+    await fastify.ready();
+    console.log('[start] Binding server to port', PORT, '(0.0.0.0)...');
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    console.log('[start] Server listening on port', PORT);
-    console.log(`   GET  /health — status`);
-    console.log(`   GET  /docs   — API reference`);
-    console.log(`   POST /api/auth/register — get started\n`);
+    console.log('[start] Server listening — / and /health ready');
   } catch (err) {
-    fastify.log.error(err);
+    console.error('[start] Listen failed:', err);
     process.exit(1);
   }
 
-  setImmediate(connectDatabase);
+  loadAllRoutes().then(() => {
+    console.log('[start] All routes loaded');
+    console.log(`   GET  /health — status`);
+    console.log(`   GET  /docs   — API reference`);
+    console.log(`   POST /api/auth/register — get started\n`);
+    setImmediate(connectDatabase);
+  }).catch((err) => {
+    console.error('[start] Route loading failed:', err);
+    process.exit(1);
+  });
 };
 
 // Graceful shutdown

@@ -4,7 +4,11 @@ const { prisma } = require('../utils/prisma');
 const { redisBullmq } = require('../utils/redis');
 const schemas = require('../schemas/requests');
 
-const pipelineQueue = new Queue('pipeline', { connection: redisBullmq });
+let _pipelineQueue;
+function getPipelineQueue() {
+  if (!_pipelineQueue) _pipelineQueue = new Queue('pipeline', { connection: redisBullmq });
+  return _pipelineQueue;
+}
 
 async function pipelineRoutes(fastify) {
 
@@ -33,7 +37,7 @@ async function pipelineRoutes(fastify) {
         }
       });
 
-      await pipelineQueue.add('pipeline', { scrapeRunId: scrapeRun.id });
+      await getPipelineQueue().add('pipeline', { scrapeRunId: scrapeRun.id });
 
       consumeCredits(request, 'pipeline.full', cost);
 

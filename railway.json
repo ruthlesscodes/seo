@@ -3,8 +3,8 @@
   "build": { "builder": "NIXPACKS" },
   "deploy": {
     "startCommand": "node src/index.js",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 90,
+    "healthcheckPath": null,
+    "healthcheckTimeout": null,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
   }

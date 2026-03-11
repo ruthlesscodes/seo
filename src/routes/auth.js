@@ -48,7 +48,7 @@ async function authRoutes(fastify) {
       const body = LoginBody.parse(request.body);
       const user = await prisma.user.findUnique({
         where: { email: body.email.toLowerCase() },
-        include: { org: { include: { apiKeys: { where: { isActive: true }, take: 1 } } }
+        include: { org: { include: { apiKeys: { where: { isActive: true }, take: 1 } } } }
       });
 
       if (!user || !user.passwordHash || !verifyPassword(body.password, user.passwordHash)) {

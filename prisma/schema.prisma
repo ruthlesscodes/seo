@@ -41,6 +41,7 @@ model User {
   id              String   @id @default(cuid())
   email           String   @unique
   name            String?
+  passwordHash    String?  // bcrypt/scrypt hash for login
   role            UserRole @default(MEMBER)
   orgId           String
   org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)

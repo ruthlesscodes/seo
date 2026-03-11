@@ -1,7 +1,24 @@
 const crypto = require('crypto');
 
+const SALT_LEN = 16;
+const KEY_LEN = 64;
+
 function generateApiKey() {
   return `seo_${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(SALT_LEN).toString('hex');
+  const hash = crypto.scryptSync(password, salt, KEY_LEN).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || !password) return false;
+  const [salt, hash] = stored.split(':');
+  if (!salt || !hash) return false;
+  const derived = crypto.scryptSync(password, salt, KEY_LEN).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
 }
 
 async function registerPluOrg(prisma) {
@@ -37,4 +54,4 @@ async function registerPluOrg(prisma) {
   return existing?.apiKeys[0]?.key || apiKey;
 }
 
-module.exports = { generateApiKey, registerPluOrg };
+module.exports = { generateApiKey, registerPluOrg, hashPassword, verifyPassword };

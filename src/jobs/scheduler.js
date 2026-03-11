@@ -2,15 +2,17 @@
  * node-cron scheduled jobs
  *
  * Schedule:
- *   Every hour    — HOURLY monitor checks
- *   Daily 2 AM    — DAILY monitor checks + decay + DeerFlow agent audits + GSC alerts
- *   Weekly Sun    — WEEKLY monitor checks
- *   Monthly 1st   — MONTHLY monitor checks
+ *   Every hour      — HOURLY monitor checks
+ *   Daily 2 AM UTC  — DAILY monitor checks + decay + DeerFlow agent audits + GSC alerts
+ *   Friday 2 AM UTC — WEEKLY monitor checks (weekly audits)
+ *   Monday 8 AM UTC — Weekly digest email (score, trend, priorities, monitor count)
+ *   Monthly 1st     — MONTHLY monitor checks
  */
 
 const cron = require('node-cron');
 const { prisma } = require('../utils/prisma');
 const firecrawl = require('../services/firecrawl');
+const { runWeeklyDigest } = require('../services/weeklyDigest');
 const { deliverWebhook } = require('../utils/webhookDelivery');
 const { PLAN_LIMITS } = require('../utils/constants');
 
@@ -194,9 +196,14 @@ function startScheduler(logger) {
     runDailyGSCAlerts(log).catch((e) => log.error(e));
   });
 
-  cron.schedule('0 0 * * 0', () => {
-    log.debug('Scheduler: running WEEKLY monitor checks');
+  cron.schedule('0 2 * * 5', () => {
+    log.debug('Scheduler: running WEEKLY monitor checks (Friday 2AM UTC)');
     runMonitorChecks('WEEKLY').catch((e) => log.error(e));
+  });
+
+  cron.schedule('0 8 * * 1', () => {
+    log.debug('Scheduler: running weekly digest (Monday 8AM UTC)');
+    runWeeklyDigest().catch((e) => log.error(e));
   });
 
   cron.schedule('0 0 1 * *', () => {
@@ -204,7 +211,7 @@ function startScheduler(logger) {
     runMonitorChecks('MONTHLY').catch((e) => log.error(e));
   });
 
-  log.info('Scheduler started (hourly, daily [+agent audits +GSC alerts], weekly, monthly)');
+  log.info('Scheduler started (hourly, daily [+agent audits +GSC alerts], weekly Fri 2AM, digest Mon 8AM, monthly)');
 }
 
-module.exports = { startScheduler, runMonitorChecks, runDecayCheck, runDailyAgentAudits };
+module.exports = { startScheduler, runMonitorChecks, runDecayCheck, runDailyAgentAudits, runWeeklyDigest };

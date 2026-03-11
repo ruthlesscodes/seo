@@ -8,7 +8,7 @@ RUN npm install --production
 
 COPY . .
 
-# PORT set at runtime (e.g. Railway); server binds 0.0.0.0:PORT
-EXPOSE 3000
+# Railway sets PORT at runtime; app binds 0.0.0.0:PORT
+EXPOSE 8080
 
-CMD ["npm", "start"]
+CMD ["node", "src/index.js"]

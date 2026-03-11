@@ -1,4 +1,5 @@
 require('dotenv').config();
+console.log('[boot] Starting SEO Agent API...');
 
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled rejection:', err);
@@ -113,6 +114,7 @@ async function loadAllRoutes() {
 
 const start = async () => {
   try {
+    console.log('[boot] Loading routes...');
     await loadAllRoutes();
     await fastify.ready();
     console.log('[start] Binding server to port', PORT, '(0.0.0.0)...');

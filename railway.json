@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": { "builder": "NIXPACKS" },
   "deploy": {
-    "startCommand": "npx prisma db push & node src/index.js",
+    "startCommand": "node src/index.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 90,
     "restartPolicyType": "ON_FAILURE",

@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
+const { normalizeDomain } = require('../utils/domain');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
@@ -55,54 +56,48 @@ async function intelligenceRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
   // POST /api/intelligence/gaps
   // Body: { domain: string, competitorDomain: string, keywords: string[] }
   fastify.post('/gaps', async (request, reply) => {
-    try {
-      const body = schemas.IntelligenceGapsBody.parse(request.body);
+    const body = schemas.IntelligenceGapsBody.parse(request.body);
 
       const cost = body.keywords.length;
       const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'intelligence.gaps', cost);
       if (!allowed) return;
 
-      const domainLower = body.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      const compLower = body.competitorDomain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const domainNorm = normalizeDomain(body.domain);
+      const compNorm = normalizeDomain(body.competitorDomain);
+
+      const settled = await Promise.allSettled(
+        body.keywords.map((kw) => firecrawl.search(kw, { limit: 10 }))
+      );
 
       const gapsData = [];
-      for (const kw of body.keywords) {
-        const searchRes = await firecrawl.search(kw, { limit: 10 });
-        const webResults = searchRes.data?.web || searchRes.data?.results || [];
+      for (let i = 0; i < body.keywords.length; i++) {
+        const kw = body.keywords[i];
+        const s = settled[i];
+        if (s.status === 'rejected') {
+          gapsData.push({ keyword: kw, domainPosition: null, competitorPosition: null, domainUrl: null, competitorUrl: null, serp: [] });
+          continue;
+        }
+        const webResults = s.value.data?.web || s.value.data?.results || [];
         let domainPos = null;
         let compPos = null;
         let domainUrl = null;
         let compUrl = null;
-        for (let i = 0; i < webResults.length; i++) {
-          const u = (webResults[i].url || '').toLowerCase();
-          if (u.includes(domainLower) || u.replace(/^https?:\/\//, '').startsWith(domainLower)) {
-            domainPos = i + 1;
-            domainUrl = webResults[i].url;
+        for (let j = 0; j < webResults.length; j++) {
+          const u = (webResults[j].url || '').toLowerCase().replace(/^https?:\/\//, '');
+          if (u.includes(domainNorm) || u.startsWith(domainNorm)) {
+            domainPos = j + 1;
+            domainUrl = webResults[j].url;
           }
-          if (u.includes(compLower) || u.replace(/^https?:\/\//, '').startsWith(compLower)) {
-            compPos = i + 1;
-            compUrl = webResults[i].url;
+          if (u.includes(compNorm) || u.startsWith(compNorm)) {
+            compPos = j + 1;
+            compUrl = webResults[j].url;
           }
         }
         gapsData.push({
@@ -127,23 +122,6 @@ async function intelligenceRoutes(fastify) {
         data: analysis,
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
       };
-    } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
-    }
   });
 
   // POST /api/intelligence/agent — SCALE+
@@ -184,28 +162,13 @@ async function intelligenceRoutes(fastify) {
         }
       }
 
-      consumeCredits(request, 'intelligence.agent', cost);
-      return {
-        success: true,
-        data: { agentId, status: 'timeout', message: 'Poll for status with GET /agent/:id' },
-        meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
-      };
-    } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
+      return reply.code(504).send({
+        error: 'timeout',
+        message: 'Agent job did not complete in time. No credits charged.',
+        agentId
       });
+    } catch (err) {
+      throw err;
     }
   });
 
@@ -249,21 +212,7 @@ async function intelligenceRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -327,21 +276,7 @@ async function intelligenceRoutes(fastify) {
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 }

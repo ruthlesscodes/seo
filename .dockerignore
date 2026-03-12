@@ -1,0 +1,32 @@
+# Dependencies (reinstalled in image)
+node_modules
+npm-debug.log
+
+# Env and secrets (never copy into image)
+.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+
+# IDE and OS
+.cursor
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Tests and docs (not needed in runtime image)
+tests
+*.test.js
+*.spec.js
+docs
+*.md
+!README.md
+
+# Build and misc
+output
+*.log
+.cache

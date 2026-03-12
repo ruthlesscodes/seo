@@ -34,7 +34,9 @@ async function checkCredits(request, reply, operation, multiplier = 1) {
       upgrade: 'POST /api/billing/upgrade',
       usage: { used: totalUsed, limit, remaining, operationCost: cost }
     });
-    return { allowed: false, remaining, cost };
+    const err = new Error('CREDITS_EXCEEDED');
+    err.replySent = true;
+    throw err;
   }
 
   return { allowed: true, remaining: remaining - cost, cost };

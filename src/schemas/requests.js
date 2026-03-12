@@ -19,7 +19,7 @@ const RegisterBody = z.object({
 // Keywords
 // ============================================
 const KeywordSearchBody = z.object({
-  keywords: z.array(z.string().min(1)).min(1).max(500),
+  keywords: z.array(z.string().min(1)).min(1).max(200),
   domain: z.string().min(3),
   region: RegionCode.optional(),
   location: z.string().optional(),
@@ -28,7 +28,7 @@ const KeywordSearchBody = z.object({
 });
 
 const KeywordClusterBody = z.object({
-  keywords: z.array(z.string().min(1)).min(2).max(500)
+  keywords: z.array(z.string().min(1)).min(2).max(200)
 });
 
 const KeywordSuggestBody = z.object({
@@ -63,7 +63,7 @@ const ContentGenerateBody = z.object({
   keyword: z.string().min(1),
   segment: z.string().default('general'),
   tone: z.string().default('professional'),
-  targetWordCount: z.number().int().min(500).max(5000).default(1800)
+  targetWordCount: z.number().int().min(500).max(3000).default(1800)
 });
 
 const ContentBriefBody = z.object({
@@ -85,7 +85,7 @@ const ContentTrendingBody = z.object({
 // Rankings
 // ============================================
 const RankCheckBody = z.object({
-  keywords: z.array(z.string().min(1)).min(1).max(500),
+  keywords: z.array(z.string().min(1)).min(1).max(200),
   domain: z.string().min(3),
   region: RegionCode.optional(),
   country: RegionCode.optional(),
@@ -131,7 +131,7 @@ const AuditBatchBody = z.object({
 
 const AuditInternalLinksBody = z.object({
   domain: z.string().min(3),
-  maxPages: z.number().int().min(10).max(500).default(100)
+  maxPages: z.number().int().min(10).max(200).default(100)
 });
 
 // ============================================
@@ -176,7 +176,7 @@ const IntelligenceGapsBody = z.object({
 });
 
 const IntelligenceAgentBody = z.object({
-  prompt: z.string().min(10),
+  prompt: z.string().min(10).max(8000),
   urls: z.array(z.string().url()).optional(),
   schema: z.record(z.any()).optional(),
   model: z.enum(['spark-1-mini', 'spark-1-pro']).default('spark-1-mini')
@@ -188,7 +188,7 @@ const IntelligenceAgentBody = z.object({
 const DomainMapBody = z.object({
   url: z.string().url(),
   search: z.string().optional(),
-  limit: z.number().int().min(1).max(10000).default(5000)
+  limit: z.number().int().min(1).max(5000).default(5000)
 });
 
 // ============================================

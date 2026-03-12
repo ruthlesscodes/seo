@@ -2,6 +2,8 @@ const { z } = require('zod');
 const Stripe = require('stripe');
 const { prisma } = require('../utils/prisma');
 
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+
 const UpgradeBody = z.object({
   plan: z.enum(['STARTER', 'GROWTH', 'SCALE'])
 });
@@ -11,6 +13,16 @@ const PLAN_PRICE_IDS = {
   GROWTH: process.env.STRIPE_GROWTH_PRICE_ID,
   SCALE: process.env.STRIPE_SCALE_PRICE_ID
 };
+
+function priceIdToPlan(priceId) {
+  if (!priceId) return null;
+  const map = {
+    [process.env.STRIPE_STARTER_PRICE_ID]: 'STARTER',
+    [process.env.STRIPE_GROWTH_PRICE_ID]: 'GROWTH',
+    [process.env.STRIPE_SCALE_PRICE_ID]: 'SCALE'
+  };
+  return map[priceId] || null;
+}
 
 async function billingRoutes(fastify) {
 
@@ -43,8 +55,9 @@ async function billingRoutes(fastify) {
           message: `Stripe price ID not configured for plan ${body.plan}`
         });
       }
-
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+      if (!stripe) {
+        return reply.code(503).send({ error: 'billing_unavailable', message: 'Stripe not configured' });
+      }
 
       let customerId = null;
       const org = await prisma.organization.findUnique({
@@ -66,7 +79,7 @@ async function billingRoutes(fastify) {
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
         mode: 'subscription',
-        line_items: [{ price: priceId }],
+        line_items: [{ price: priceId, quantity: 1 }],
         success_url: process.env.STRIPE_SUCCESS_URL || `${process.env.APP_URL || 'https://app.seoagent.dev'}/billing/success`,
         cancel_url: process.env.STRIPE_CANCEL_URL || `${process.env.APP_URL || 'https://app.seoagent.dev'}/billing`,
         metadata: { orgId: request.org.id, plan: body.plan }
@@ -77,21 +90,16 @@ async function billingRoutes(fastify) {
         data: { checkoutUrl: session.url, sessionId: session.id }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
   // POST /api/billing/webhook — Stripe webhook handler (PUBLIC, no auth)
   fastify.post('/webhook', async (request, reply) => {
     try {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+      if (!stripe) {
+        return reply.code(503).send({ error: 'billing_unavailable', message: 'Stripe not configured' });
+      }
       const sig = request.headers['stripe-signature'];
       const rawBody = request.rawBody || JSON.stringify(request.body || {});
 
@@ -113,7 +121,17 @@ async function billingRoutes(fastify) {
         case 'checkout.session.completed': {
           const session = event.data.object;
           const orgId = session.metadata?.orgId;
-          const plan = session.metadata?.plan || session.subscription ? 'STARTER' : null;
+          let plan = session.metadata?.plan || null;
+          if (!plan && session.subscription) {
+            try {
+              const sub = await stripe.subscriptions.retrieve(session.subscription, { expand: ['items.data.price'] });
+              const priceId = sub.items?.data?.[0]?.price?.id;
+              plan = priceIdToPlan(priceId) || 'STARTER';
+            } catch (e) {
+              request.log.warn({ err: e }, 'Could not derive plan from subscription');
+              plan = 'STARTER';
+            }
+          }
           if (orgId && plan) {
             await prisma.organization.update({
               where: { id: orgId },
@@ -132,8 +150,8 @@ async function billingRoutes(fastify) {
           const sub = event.data.object;
           const org = await prisma.organization.findFirst({ where: { stripeSubId: sub.id } });
           if (org) {
-            const planMap = { price_starter: 'STARTER', price_growth: 'GROWTH', price_scale: 'SCALE' };
-            const plan = planMap[sub.items?.data?.[0]?.price?.id] || org.plan;
+            const priceId = sub.items?.data?.[0]?.price?.id;
+            const plan = priceIdToPlan(priceId) || org.plan;
             await prisma.organization.update({
               where: { id: org.id },
               data: { plan }
@@ -162,8 +180,7 @@ async function billingRoutes(fastify) {
 
       return { received: true };
     } catch (err) {
-      request.log.error(err);
-      return reply.code(500).send({ error: 'internal_error' });
+      throw err;
     }
   });
 }

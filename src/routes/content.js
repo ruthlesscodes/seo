@@ -63,21 +63,7 @@ async function contentRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -113,21 +99,7 @@ async function contentRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -167,21 +139,7 @@ async function contentRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -234,21 +192,7 @@ async function contentRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 }

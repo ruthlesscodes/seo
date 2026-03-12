@@ -1,22 +1,16 @@
 // ============================================
 // Full Pipeline Job
-// Orchestrates the complete weekly cycle:
-// 1. Scrape keywords
-// 2. Crawl competitors
-// 3. Analyze with Claude
-// 4. Generate blog drafts
-// 5. Track rankings
-// 6. Send notifications
+// Uses real firecrawl + claude APIs (no fake service classes).
+// Run: node src/jobs/fullPipeline.js
 // ============================================
 
 require('dotenv').config();
-const { FirecrawlService } = require('../services/firecrawl');
-const { ClaudeAnalysisService } = require('../services/claude');
+const { normalizeDomain } = require('../utils/domain');
+const firecrawl = require('../services/firecrawl');
+const claude = require('../services/claude');
 
 class FullPipeline {
   constructor(config = {}) {
-    this.firecrawl = new FirecrawlService();
-    this.claude = new ClaudeAnalysisService();
     this.config = {
       orgDomain: config.orgDomain || 'getplu.com',
       orgContext: config.orgContext || 'Plu is a fintech neobank helping immigrants build credit in 6 months. Zero FX fees, virtual card qualification system, available at app.getplu.com.',
@@ -27,13 +21,10 @@ class FullPipeline {
     this.results = {};
   }
 
-  // ============================================
-  // RUN THE FULL PIPELINE
-  // ============================================
   async run() {
     const runId = `run_${Date.now()}`;
     const startTime = Date.now();
-    
+
     console.log(`\n🚀 Starting Full SEO Pipeline [${runId}]`);
     console.log(`   Domain: ${this.config.orgDomain}`);
     console.log(`   Keywords: ${this.config.keywords.length}`);
@@ -41,68 +32,41 @@ class FullPipeline {
     console.log('');
 
     try {
-      // ── Step 1: Keyword Research ──
       console.log('📊 Step 1/5: Scraping keywords...');
       const keywordResults = await this._scrapeKeywords();
       this.results.keywords = keywordResults;
       console.log(`   ✅ Scraped ${keywordResults.length} keywords`);
       console.log(`   📍 Ranking for ${keywordResults.filter(k => k.isRanking).length} keywords`);
-      console.log(`   🎯 ${keywordResults.filter(k => !k.isRanking).length} content gaps found`);
 
-      // ── Step 2: Competitor Analysis ──
       console.log('\n🔍 Step 2/5: Crawling competitors...');
       const competitorData = await this._crawlCompetitors();
       this.results.competitors = competitorData;
       console.log(`   ✅ Crawled ${competitorData.length} competitors`);
-      competitorData.forEach(c => {
-        console.log(`   📄 ${c.domain}: ${c.totalPages} pages, avg ${c.avgWordCount} words`);
-      });
 
-      // ── Step 3: AI Analysis ──
       console.log('\n🧠 Step 3/5: AI analysis & strategy...');
-      const analysis = await this.claude.generateWeeklyBrief({
-        keywordResults: keywordResults.map(k => ({
-          keyword: k.keyword,
-          segment: k.segment,
-          results: k.topResults
-        })),
-        competitorData,
-        orgDomain: this.config.orgDomain,
-        orgContext: this.config.orgContext
-      });
+      const analysis = await this._generateWeeklyBrief(keywordResults, competitorData);
       this.results.analysis = analysis;
       console.log(`   ✅ Generated weekly brief`);
-      console.log(`   📝 ${analysis.topOpportunities?.length || 0} opportunities identified`);
-      console.log(`   📅 ${analysis.contentCalendar?.length || 0} blog posts planned`);
 
-      // ── Step 4: Blog Generation ──
       console.log('\n✍️  Step 4/5: Generating blog drafts...');
       const blogDrafts = await this._generateBlogs(analysis);
       this.results.blogs = blogDrafts;
       console.log(`   ✅ Generated ${blogDrafts.length} blog drafts`);
 
-      // ── Step 5: Rank Tracking ──
       console.log('\n📈 Step 5/5: Tracking rankings...');
       const rankings = await this._trackRankings();
       this.results.rankings = rankings;
-      const rankingCount = rankings.filter(r => r.isRanking).length;
       console.log(`   ✅ Tracked ${rankings.length} keywords`);
-      console.log(`   📍 Currently ranking for ${rankingCount}/${rankings.length}`);
 
-      // ── Summary ──
       const duration = Math.round((Date.now() - startTime) / 1000);
-      const creditsUsed = this.firecrawl.getCreditsUsed();
-
       const summary = {
         runId,
         duration: `${duration}s`,
-        creditsUsed,
         keywordsScraped: keywordResults.length,
         competitorsCrawled: competitorData.length,
-        contentGapsFound: keywordResults.filter(k => !k.isRanking).length,
         blogsGenerated: blogDrafts.length,
-        currentRankings: rankingCount,
-        headline: analysis.headline || 'Analysis complete'
+        currentRankings: rankings.filter(r => r.isRanking).length,
+        headline: analysis?.headline || 'Analysis complete'
       };
 
       console.log('\n' + '='.repeat(50));
@@ -119,7 +83,6 @@ class FullPipeline {
         keywordResults,
         competitorData
       };
-
     } catch (error) {
       console.error('\n❌ Pipeline failed:', error.message);
       return {
@@ -130,183 +93,173 @@ class FullPipeline {
     }
   }
 
-  // ============================================
-  // INTERNAL METHODS
-  // ============================================
-
   async _scrapeKeywords() {
-    const results = await this.firecrawl.batchSearchKeywords(
-      this.config.keywords,
-      { concurrency: 3, delayMs: 1500 }
+    const domainClean = normalizeDomain(this.config.orgDomain, { stripWww: true });
+    const results = await Promise.allSettled(
+      this.config.keywords.map(async (kw) => {
+        const keyword = typeof kw === 'string' ? kw : kw.keyword;
+        const res = await firecrawl.search(keyword, { limit: 10 });
+        const webResults = res.data?.web || res.data?.results || [];
+        const ourResult = webResults.find((r) => {
+          const u = (r.url || '').toLowerCase();
+          return u.includes(domainClean);
+        });
+        return {
+          keyword,
+          segment: kw.segment || 'core',
+          priority: kw.priority || 2,
+          isRanking: !!ourResult,
+          ourPosition: ourResult?.position ?? null,
+          ourUrl: ourResult?.url || null,
+          topResults: webResults.slice(0, 10),
+          opportunity: !ourResult ? 'HIGH' : (ourResult.position > 5 ? 'MEDIUM' : 'LOW')
+        };
+      })
     );
-
-    return results.map(r => {
-      const domainClean = this.config.orgDomain.replace(/^(www\.)?/, '');
-      const ourResult = r.results?.find(res => 
-        res.domain.includes(domainClean)
-      );
-
-      return {
-        keyword: r.keyword,
-        segment: r.segment || 'core',
-        priority: r.priority || 2,
-        isRanking: !!ourResult,
-        ourPosition: ourResult?.position || null,
-        ourUrl: ourResult?.url || null,
-        topResults: r.results?.slice(0, 10) || [],
-        opportunity: !ourResult ? 'HIGH' : (ourResult.position > 5 ? 'MEDIUM' : 'LOW')
-      };
-    });
+    return results.map((r) => (r.status === 'fulfilled' ? r.value : { keyword: '?', isRanking: false, topResults: [] }));
   }
 
   async _crawlCompetitors() {
     const results = [];
-    
     for (const comp of this.config.competitors) {
-      console.log(`   🔄 Crawling ${comp.name || comp.domain}...`);
-      const crawlResult = await this.firecrawl.crawlCompetitor(
-        comp.domain,
-        comp.blogPath || '/blog',
-        { limit: 15 }
-      );
-      
-      if (crawlResult.success) {
-        results.push(crawlResult);
-      } else {
-        console.log(`   ⚠️  Failed to crawl ${comp.domain}: ${crawlResult.error}`);
+      const domain = typeof comp === 'string' ? comp : comp.domain;
+      const url = domain.startsWith('http') ? domain : `https://${domain}`;
+      try {
+        console.log(`   🔄 Crawling ${domain}...`);
+        const crawlRes = await firecrawl.crawl(url, { limit: 15, formats: ['markdown', 'links'] });
+        const crawlId = crawlRes.id || crawlRes.data?.id;
+        if (!crawlId) {
+          results.push({ domain, success: false, error: 'No crawl ID' });
+          continue;
+        }
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const status = await firecrawl.getCrawlStatus(crawlId);
+          const s = status.status || status.data?.status;
+          if (s === 'completed') {
+            const data = status.data || status;
+            const rawPages = data.data || data.completed || [];
+            const pages = rawPages.map((p) => ({ url: p.metadata?.url || p.url, markdown: p.markdown }));
+            results.push({
+              domain,
+              success: true,
+              totalPages: pages.length,
+              pages,
+              avgWordCount: pages.reduce((a, p) => a + ((p.markdown || '').split(/\s+/).length || 0), 0) / (pages.length || 1) | 0
+            });
+            break;
+          }
+          if (s === 'failed') {
+            results.push({ domain, success: false, error: status.error || 'Crawl failed' });
+            break;
+          }
+        }
+        if (results[results.length - 1]?.domain !== domain) {
+          results.push({ domain, success: false, error: 'Timeout' });
+        }
+      } catch (e) {
+        results.push({ domain, success: false, error: e.message });
       }
-      
-      // Delay between competitor crawls
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
-
     return results;
+  }
+
+  async _generateWeeklyBrief(keywordResults, competitorData) {
+    const input = JSON.stringify({
+      keywordResults: keywordResults.map((k) => ({ keyword: k.keyword, segment: k.segment, isRanking: k.isRanking, topResults: k.topResults?.slice(0, 5) })),
+      competitorData: competitorData.filter((c) => c.success).map((c) => ({ domain: c.domain, totalPages: c.totalPages })),
+      orgDomain: this.config.orgDomain,
+      orgContext: this.config.orgContext
+    });
+    const analysis = await claude.analyzeJSON(claude.PROMPTS.STRATEGIC_BRIEF, input);
+    return {
+      ...analysis,
+      topOpportunities: analysis.topOpportunities || [],
+      contentCalendar: analysis.contentCalendar || [],
+      headline: analysis.summary || 'Analysis complete'
+    };
   }
 
   async _generateBlogs(analysis) {
     const drafts = [];
-    const calendar = analysis.contentCalendar || [];
-    
-    // Generate first 2 blog posts from the calendar
+    const calendar = analysis.contentCalendar || analysis.quickWins || [];
     const postsToGenerate = calendar.slice(0, 2);
-    
+
     for (const post of postsToGenerate) {
-      console.log(`   📝 Writing: "${post.title}"...`);
-      
-      // Find competitor content for this keyword
+      const title = post.title || post.topic || post.keyword || 'Blog post';
+      const targetKeyword = post.targetKeyword || post.keyword || post.topic || 'SEO';
       const competitorContent = this.results.competitors
-        ?.flatMap(c => c.pages || [])
-        .filter(p => {
-          const topics = p.topics || [];
-          return topics.some(t => 
-            post.targetKeyword.toLowerCase().split(' ').some(kw => t.includes(kw))
-          );
-        })
-        .slice(0, 3);
+        ?.flatMap((c) => c.pages || [])
+        .slice(0, 3)
+        .map((p) => (p.markdown || '').slice(0, 500))
+        .join('\n\n');
 
-      const draft = await this.claude.generateBlogPost({
-        title: post.title,
-        targetKeyword: post.targetKeyword,
-        secondaryKeywords: post.secondaryKeywords,
-        segment: post.segment,
-        outline: post.outline,
-        wordCountTarget: post.wordCountTarget || 1500,
-        orgContext: this.config.orgContext,
-        competitorContent
-      });
-
-      if (draft.success) {
-        drafts.push(draft);
+      try {
+        const content = await claude.analyze(
+          claude.PROMPTS.CONTENT_GENERATE,
+          `Title: ${title}\nTarget keyword: ${targetKeyword}\nOrg context: ${this.config.orgContext}\n\nCompetitor context:\n${competitorContent || 'None'}`,
+          { maxTokens: 4096 }
+        );
+        drafts.push({ success: true, title, targetKeyword, content });
+      } catch (e) {
+        drafts.push({ success: false, title, error: e.message });
       }
-      
-      // Delay between generations
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
-
     return drafts;
   }
 
   async _trackRankings() {
-    // Track a subset of priority keywords
     const priorityKeywords = this.config.keywords
-      .filter(k => k.priority === 1)
-      .slice(0, 20);
+      .filter((k) => (k.priority || 2) === 1)
+      .slice(0, 20)
+      .map((k) => (typeof k === 'string' ? k : k.keyword));
 
-    const rankings = [];
-    
-    for (const kw of priorityKeywords) {
-      const ranking = await this.firecrawl.trackRanking(
-        kw.keyword,
-        this.config.orgDomain
-      );
-      rankings.push(ranking);
-      
-      // Rate limit
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+    const domainClean = normalizeDomain(this.config.orgDomain, { stripWww: true });
 
-    return rankings;
+    const results = await Promise.allSettled(
+      priorityKeywords.map(async (keyword) => {
+        const res = await firecrawl.search(keyword, { limit: 10 });
+        const webResults = res.data?.web || res.data?.results || [];
+        const ourResult = webResults.find((r) => (r.url || '').toLowerCase().includes(domainClean));
+        return {
+          keyword,
+          isRanking: !!ourResult,
+          position: ourResult?.position ?? null,
+          url: ourResult?.url || null
+        };
+      })
+    );
+    return results.map((r) => (r.status === 'fulfilled' ? r.value : { keyword: '?', isRanking: false }));
   }
 }
 
-// ============================================
-// CLI EXECUTION
-// Run directly: node src/jobs/fullPipeline.js
-// ============================================
 if (require.main === module) {
   const pipeline = new FullPipeline({
     orgDomain: 'getplu.com',
-    orgContext: 'Plu is a fintech neobank helping immigrants build credit in 6 months. Features: virtual card qualification (6 months usage + $500 spend + subscription), zero FX fees, targeting OFW, Nigerian diaspora, and US immigrant communities.',
-    
+    orgContext: 'Plu is a fintech neobank helping immigrants build credit in 6 months.',
     keywords: [
-      // Core - Priority 1
       { keyword: 'build credit as immigrant', segment: 'core', priority: 1 },
-      { keyword: 'credit card for immigrants', segment: 'core', priority: 1 },
-      { keyword: 'neobank for immigrants', segment: 'core', priority: 1 },
-      { keyword: 'no credit history banking', segment: 'core', priority: 1 },
-      { keyword: 'immigrant credit building', segment: 'core', priority: 1 },
-      
-      // OFW - Priority 1
-      { keyword: 'OFW remittance fees', segment: 'ofw', priority: 1 },
-      { keyword: 'OFW banking abroad', segment: 'ofw', priority: 1 },
-      { keyword: 'Filipino credit card abroad', segment: 'ofw', priority: 1 },
-      
-      // Nigerian - Priority 1
-      { keyword: 'Nigerian diaspora banking', segment: 'nigerian', priority: 1 },
-      { keyword: 'Japa banking guide', segment: 'nigerian', priority: 1 },
-      
-      // US Immigrant - Priority 2
-      { keyword: 'H1B visa credit card', segment: 'us_immigrant', priority: 2 },
-      { keyword: 'ITIN credit card', segment: 'us_immigrant', priority: 2 },
-      { keyword: 'build credit with ITIN', segment: 'us_immigrant', priority: 2 },
-      
-      // Niche - Priority 2
-      { keyword: 'digital nomad credit card', segment: 'niche', priority: 2 },
-      { keyword: 'zero forex fee card', segment: 'niche', priority: 2 },
-      { keyword: 'international student banking', segment: 'niche', priority: 2 }
+      { keyword: 'credit card for immigrants', segment: 'core', priority: 1 }
     ],
-    
     competitors: [
-      { name: 'Wise', domain: 'wise.com', blogPath: '/blog' },
-      { name: 'Remitly', domain: 'remitly.com', blogPath: '/blog' },
-      { name: 'Nova Credit', domain: 'novacredit.com', blogPath: '/resources' },
-      { name: 'Chime', domain: 'chime.com', blogPath: '/blog' }
+      { domain: 'wise.com' },
+      { domain: 'remitly.com' }
     ]
   });
 
-  pipeline.run()
-    .then(result => {
+  pipeline
+    .run()
+    .then((result) => {
       if (result.success) {
-        // Save results to file for review
         const fs = require('fs');
-        const outputPath = `./output/pipeline-${Date.now()}.json`;
         fs.mkdirSync('./output', { recursive: true });
-        fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
-        console.log(`\n📁 Full results saved to: ${outputPath}`);
+        fs.writeFileSync(`./output/pipeline-${Date.now()}.json`, JSON.stringify(result, null, 2));
       }
       process.exit(result.success ? 0 : 1);
     })
-    .catch(err => {
+    .catch((err) => {
       console.error('Fatal error:', err);
       process.exit(1);
     });

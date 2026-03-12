@@ -8,17 +8,25 @@ function generateApiKey() {
 }
 
 function hashPassword(password) {
-  const salt = crypto.randomBytes(SALT_LEN).toString('hex');
-  const hash = crypto.scryptSync(password, salt, KEY_LEN).toString('hex');
-  return `${salt}:${hash}`;
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(SALT_LEN).toString('hex');
+    crypto.scrypt(password, salt, KEY_LEN, (err, derived) => {
+      if (err) return reject(err);
+      resolve(`${salt}:${derived.toString('hex')}`);
+    });
+  });
 }
 
 function verifyPassword(password, stored) {
-  if (!stored || !password) return false;
-  const [salt, hash] = stored.split(':');
-  if (!salt || !hash) return false;
-  const derived = crypto.scryptSync(password, salt, KEY_LEN).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derived, 'hex'));
+  return new Promise((resolve) => {
+    if (!stored || !password) return resolve(false);
+    const [salt, hash] = stored.split(':');
+    if (!salt || !hash) return resolve(false);
+    crypto.scrypt(password, salt, KEY_LEN, (err, derived) => {
+      if (err) return resolve(false);
+      resolve(crypto.timingSafeEqual(Buffer.from(hash, 'hex'), derived));
+    });
+  });
 }
 
 async function registerPluOrg(prisma) {

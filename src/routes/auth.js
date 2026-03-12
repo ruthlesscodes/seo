@@ -4,30 +4,61 @@ const { z } = require('zod');
 
 const LoginBody = z.object({ email: z.string().email(), password: z.string().min(1) });
 
+const REGISTER_RATE_LIMIT = 5;   // per window
+const REGISTER_RATE_WINDOW = 3600; // 1 hour in seconds
+
 async function authRoutes(fastify) {
 
-  // POST /api/auth/register — create org + get API key
+  // POST /api/auth/register — create org + get API key (rate limited by IP)
   fastify.post('/register', async (request, reply) => {
+    const ip = request.ip || request.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+    const windowKey = `rl:register:${ip}:${Math.floor(Date.now() / 3600000)}`;
+    try {
+      const current = await request.server.redis.incr(windowKey);
+      if (current === 1) await request.server.redis.expire(windowKey, REGISTER_RATE_WINDOW);
+      if (current > REGISTER_RATE_LIMIT) {
+        return reply.code(429).send({
+          error: 'rate_limit_exceeded',
+          message: 'Too many registration attempts. Try again later.'
+        });
+      }
+    } catch (_) {
+      // Redis down: allow request but log
+      request.log.warn('Register rate limit check failed (Redis?)');
+    }
+
     const { name, domain, email, password } = request.body || {};
 
     if (!name || !domain || !email) {
       return reply.code(400).send({ error: 'name, domain, and email are required' });
     }
+    if (!password || String(password).length < 8) {
+      return reply.code(400).send({
+        error: 'password_required',
+        message: 'Password is required (min 8 characters) to enable login.'
+      });
+    }
 
-    // Check if domain already registered
-    const existing = await prisma.organization.findFirst({ where: { domain } });
+    const emailNormalized = email.toLowerCase().trim();
+    const domainNormalized = domain.toLowerCase().trim();
+
+    const existing = await prisma.organization.findFirst({ where: { domain: domainNormalized } });
     if (existing) {
       return reply.code(409).send({ error: 'domain_already_registered' });
     }
 
     const apiKey = generateApiKey();
-    const userData = { email, name, role: 'OWNER' };
-    if (password) userData.passwordHash = hashPassword(password);
+    const userData = {
+      email: emailNormalized,
+      name: (name || '').trim(),
+      role: 'OWNER',
+      passwordHash: await hashPassword(password)
+    };
 
     const org = await prisma.organization.create({
       data: {
-        name,
-        domain,
+        name: (name || '').trim(),
+        domain: domainNormalized,
         plan: 'FREE',
         users: { create: userData },
         apiKeys: { create: { key: apiKey, name: 'Default' } }
@@ -36,7 +67,7 @@ async function authRoutes(fastify) {
 
     return {
       success: true,
-      organization: { id: org.id, name, domain, plan: 'FREE' },
+      organization: { id: org.id, name: org.name, domain: org.domain, plan: 'FREE' },
       apiKey,
       message: 'Store this API key securely. It cannot be retrieved again.'
     };
@@ -51,7 +82,7 @@ async function authRoutes(fastify) {
         include: { org: { include: { apiKeys: { where: { isActive: true }, take: 1 } } } }
       });
 
-      if (!user || !user.passwordHash || !verifyPassword(body.password, user.passwordHash)) {
+      if (!user || !user.passwordHash || !(await verifyPassword(body.password, user.passwordHash))) {
         return reply.code(401).send({ error: 'invalid_credentials', message: 'Invalid email or password' });
       }
 

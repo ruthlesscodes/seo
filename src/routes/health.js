@@ -1,6 +1,7 @@
 async function healthRoutes(fastify) {
   // /health is registered in index.js first (no auth, no DB) for healthcheck; do not duplicate here
-  fastify.get('/docs', async () => ({
+  // GET /docs is served by @fastify/swagger-ui in index.js
+  fastify.get('/api-docs-simple', async () => ({
     name: 'SEO Agent API',
     version: '2.0.0',
     description: 'API-first SEO intelligence platform. Firecrawl gives raw web data. We give SEO intelligence.',

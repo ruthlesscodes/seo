@@ -8,6 +8,7 @@ require('dotenv').config();
 const { Worker } = require('bullmq');
 const { redisBullmq } = require('../utils/redis');
 const { prisma } = require('../utils/prisma');
+const { normalizeDomain } = require('../utils/domain');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { deliverWebhook } = require('../utils/webhookDelivery');
@@ -35,18 +36,18 @@ async function processPipelineJob(job) {
   const result = { rankings: [], competitorInsights: [], strategicBrief: null, blogDraft: null };
 
   try {
+    const domainNorm = normalizeDomain(domain);
     // Step 1: firecrawl.search per keyword → RankSnapshot
     for (const kw of keywords) {
       try {
         const searchRes = await firecrawl.search(kw, { limit: 10, country: region });
         const webResults = searchRes.data?.web || searchRes.data?.results || [];
-        const domainLower = domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
         let position = null;
         let rankingUrl = null;
         for (let i = 0; i < webResults.length; i++) {
           const r = webResults[i];
-          const u = (r.url || '').toLowerCase();
-          if (u.includes(domainLower) || u.replace(/^https?:\/\//, '').startsWith(domainLower)) {
+          const u = (r.url || '').toLowerCase().replace(/^https?:\/\//, '');
+          if (u.includes(domainNorm) || u.startsWith(domainNorm)) {
             position = r.position ?? i + 1;
             rankingUrl = r.url;
             break;

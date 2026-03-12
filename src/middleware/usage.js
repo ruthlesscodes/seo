@@ -1,8 +1,8 @@
-const { PUBLIC_PATHS } = require('../utils/constants');
+const { isPublicPath } = require('../utils/constants');
 const { prisma } = require('../utils/prisma');
 
 async function usageMiddleware(request, reply) {
-  if (PUBLIC_PATHS.some(p => request.url.startsWith(p))) return;
+  if (isPublicPath(request.url)) return;
   if (!request.org) return;
   if (!request.creditsUsed) return; // routes set this when they consume credits
 

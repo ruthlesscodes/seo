@@ -1,7 +1,7 @@
-const { PUBLIC_PATHS } = require('../utils/constants');
+const { isPublicPath } = require('../utils/constants');
 
 async function rateLimitMiddleware(request, reply) {
-  if (PUBLIC_PATHS.some(p => request.url.startsWith(p))) return;
+  if (isPublicPath(request.url)) return;
   if (!request.org) return;
 
   const windowKey = `rl:${request.org.id}:${Math.floor(Date.now() / 60000)}`;

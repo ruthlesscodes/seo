@@ -1,9 +1,11 @@
 const { z } = require('zod');
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
+const { normalizeDomain } = require('../utils/domain');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
 const schemas = require('../schemas/requests');
+const { validateUrlForScraping } = require('../utils/urlValidation');
 
 const CompetitorBrandBody = z.object({ url: z.string().url() });
 
@@ -19,7 +21,7 @@ async function competitorRoutes(fastify) {
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'competitor.crawl');
       if (!allowed) return;
 
-      const crawlUrl = body.domain.startsWith('http') ? body.domain : `https://${body.domain}`;
+      const { url: crawlUrl } = validateUrlForScraping(body.domain);
       const crawlRes = await firecrawl.crawl(crawlUrl, {
         limit: body.maxPages,
         formats: ['markdown', 'links'],
@@ -96,21 +98,7 @@ async function competitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -120,11 +108,12 @@ async function competitorRoutes(fastify) {
   fastify.post('/scrape', async (request, reply) => {
     try {
       const body = schemas.CompetitorScrapeBody.parse(request.body);
+      const { url } = validateUrlForScraping(body.url);
 
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'competitor.scrape');
       if (!allowed) return;
 
-      const result = await firecrawl.scrape(body.url, { formats: body.formats });
+      const result = await firecrawl.scrape(url, { formats: body.formats });
 
       consumeCredits(request, 'competitor.scrape', cost);
 
@@ -134,21 +123,12 @@ async function competitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
       }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -168,17 +148,17 @@ async function competitorRoutes(fastify) {
       });
       const webResults = searchRes.data?.web || searchRes.data?.results || [];
 
-      const domainLower = body.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      const compLower = body.competitorDomain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const domainNorm = normalizeDomain(body.domain);
+      const compNorm = normalizeDomain(body.competitorDomain);
 
       let domainUrl = null;
       let compUrl = null;
       for (const r of webResults) {
         const u = (r.url || '').toLowerCase();
-        if (!domainUrl && (u.includes(domainLower) || u.replace(/^https?:\/\//, '').startsWith(domainLower))) {
+        if (!domainUrl && (u.includes(domainNorm) || u.startsWith(domainNorm))) {
           domainUrl = r.url;
         }
-        if (!compUrl && (u.includes(compLower) || u.replace(/^https?:\/\//, '').startsWith(compLower))) {
+        if (!compUrl && (u.includes(compNorm) || u.startsWith(compNorm))) {
           compUrl = r.url;
         }
         if (domainUrl && compUrl) break;
@@ -215,21 +195,7 @@ async function competitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -266,21 +232,7 @@ async function competitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -306,21 +258,7 @@ async function competitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 }

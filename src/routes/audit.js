@@ -10,6 +10,7 @@ const { prisma } = require('../utils/prisma');
 const { deliverWebhook } = require('../utils/webhookDelivery');
 const schemas = require('../schemas/requests');
 const fcSchemas = require('../schemas/firecrawl');
+const { validateUrlForScraping } = require('../utils/urlValidation');
 
 const AuditScreenshotBody = z.object({
   url: z.string().url(),
@@ -65,11 +66,7 @@ async function auditRoutes(fastify) {
         },
       };
     } catch (err) {
-      request.log.error(err);
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.',
-      });
+      throw err;
     }
   });
 
@@ -77,14 +74,21 @@ async function auditRoutes(fastify) {
   fastify.post('/technical', async (request, reply) => {
     try {
       const body = schemas.AuditTechnicalBody.parse(request.body);
-      const domain = body.domain || (body.url ? new URL(body.url).hostname : null);
+      let mapUrl;
+      if (body.url) {
+        ({ url: mapUrl } = validateUrlForScraping(body.url));
+      } else if (body.domain) {
+        ({ url: mapUrl } = validateUrlForScraping(body.domain));
+      } else {
+        return reply.code(400).send({ error: 'validation_error', message: 'url or domain required' });
+      }
+      const domain = new URL(mapUrl).hostname;
       const maxPages = body.maxPages || 10;
 
       let urls = [];
       if (body.url) {
-        urls = [body.url];
-      } else if (body.domain) {
-        const mapUrl = body.domain.startsWith('http') ? body.domain : `https://${body.domain}`;
+        urls = [mapUrl];
+      } else {
         const mapRes = await firecrawl.map(mapUrl, { limit: maxPages });
         urls = mapRes.data?.links || mapRes.links || mapRes.data?.urls || [];
       }
@@ -101,24 +105,37 @@ async function auditRoutes(fastify) {
         },
       });
 
-      const pages = [];
-      const summaryCounts = { critical: 0, warnings: 0, info: 0 };
-
-      for (const url of urls.slice(0, Math.ceil(100 / 8))) {
-        try {
+      const urlsToAudit = urls.slice(0, Math.ceil(100 / 8));
+      const settled = await Promise.allSettled(
+        urlsToAudit.map(async (url) => {
           const scrapeRes = await firecrawl.scrape(url, {
             formats: ['markdown', 'links'],
             jsonSchema: fcSchemas.SEO_AUDIT_SCHEMA,
           });
           const extracted = scrapeRes.data?.json || scrapeRes.json || {};
           const analysis = await claude.analyzeJSON(claude.PROMPTS.TECHNICAL_AUDIT, JSON.stringify(extracted));
+          return { url, extracted, analysis };
+        })
+      );
 
-          const summary = analysis.summary || {};
-          summaryCounts.critical += summary.critical || 0;
-          summaryCounts.warnings += summary.warnings || 0;
-          summaryCounts.info += summary.info || 0;
+      const pages = [];
+      const summaryCounts = { critical: 0, warnings: 0, info: 0 };
+      const createPromises = [];
+      for (let i = 0; i < settled.length; i++) {
+        const s = settled[i];
+        const url = urlsToAudit[i];
+        if (s.status === 'rejected') {
+          request.log.warn({ url, err: s.reason }, 'Audit page failed');
+          continue;
+        }
+        const { extracted, analysis } = s.value;
+        const summary = analysis.summary || {};
+        summaryCounts.critical += summary.critical || 0;
+        summaryCounts.warnings += summary.warnings || 0;
+        summaryCounts.info += summary.info || 0;
 
-          await prisma.auditPage.create({
+        createPromises.push(
+          prisma.auditPage.create({
             data: {
               auditRunId: auditRun.id,
               url,
@@ -135,13 +152,11 @@ async function auditRoutes(fastify) {
               schemaTypes: extracted.schema_types,
               issues: analysis.issues,
             },
-          });
-
-          pages.push({ url, score: analysis.score, issues: analysis.issues, summary: analysis.summary });
-        } catch (e) {
-          request.log.warn({ url, err: e }, 'Audit page failed');
-        }
+          })
+        );
+        pages.push({ url, score: analysis.score, issues: analysis.issues, summary: analysis.summary });
       }
+      await Promise.all(createPromises);
 
       const avgScore = pages.length ? Math.round(pages.reduce((s, p) => s + (p.score || 0), 0) / pages.length) : 0;
       const issuesFound = summaryCounts.critical + summaryCounts.warnings + summaryCounts.info;
@@ -179,10 +194,12 @@ async function auditRoutes(fastify) {
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan },
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) return reply.code(err.status).send({ error: 'upstream_error', message: err.message, details: err.details });
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong. Please try again.' });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
+      }
+      throw err;
     }
   });
 
@@ -205,10 +222,7 @@ async function auditRoutes(fastify) {
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan },
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) return reply.code(err.status).send({ error: 'upstream_error', message: err.message });
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong.' });
+      throw err;
     }
   });
 
@@ -268,10 +282,7 @@ async function auditRoutes(fastify) {
 
       return reply.code(504).send({ error: 'timeout', message: 'Crawl did not complete in time. You were not charged.' });
     } catch (err) {
-      request.log.error(err);
-      if (err.status) return reply.code(err.status).send({ error: 'upstream_error', message: err.message });
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong.' });
+      throw err;
     }
   });
 
@@ -279,10 +290,11 @@ async function auditRoutes(fastify) {
   fastify.post('/screenshot', async (request, reply) => {
     try {
       const body = AuditScreenshotBody.parse(request.body);
+      const { url } = validateUrlForScraping(body.url);
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'audit.screenshot');
       if (!allowed) return;
 
-      const result = await firecrawl.scrape(body.url, { formats: ['screenshot'] });
+      const result = await firecrawl.scrape(url, { formats: ['screenshot'] });
       consumeCredits(request, 'audit.screenshot', cost);
       const screenshot = result.data?.screenshot || result.screenshot;
 
@@ -292,10 +304,12 @@ async function auditRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan },
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) return reply.code(err.status).send({ error: 'upstream_error', message: err.message });
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong.' });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
+      }
+      throw err;
     }
   });
 
@@ -339,16 +353,14 @@ async function auditRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan },
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: err.message });
+      throw err;
     }
   });
 
-  // POST /api/audit/agent — DeerFlow multi-agent audit (GROWTH+)
+  // POST /api/audit/agent — DeerFlow multi-agent audit (SCALE+)
   fastify.post('/agent', async (request, reply) => {
     try {
-      if (!checkFeature(request, reply, 'pipeline')) return;
+      if (!checkFeature(request, reply, 'audit.agent')) return;
 
       const body = AuditAgentBody.parse(request.body);
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'audit.agent');
@@ -372,9 +384,7 @@ async function auditRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan },
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.name === 'ZodError') return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      return reply.code(500).send({ error: 'internal_error', message: err.message });
+      throw err;
     }
   });
 
@@ -401,8 +411,7 @@ async function auditRoutes(fastify) {
 
       return { success: true, data: runs };
     } catch (err) {
-      request.log.error(err);
-      return reply.code(500).send({ error: 'internal_error', message: 'Could not fetch audit history.' });
+      throw err;
     }
   });
 }

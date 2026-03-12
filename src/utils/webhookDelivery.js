@@ -17,11 +17,10 @@ async function deliverWebhook(orgId, event, payload) {
     if (!events.includes(event)) continue;
 
     const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
-    const secret = config.secret || 'webhook-secret';
-    const signature = crypto
-      .createHmac('sha256', secret)
-      .update(payloadStr)
-      .digest('hex');
+    const secret = config.secret && String(config.secret).trim();
+    const signature = secret
+      ? crypto.createHmac('sha256', secret).update(payloadStr).digest('hex')
+      : null;
 
     const delivery = await prisma.webhookDelivery.create({
       data: {
@@ -35,13 +34,15 @@ async function deliverWebhook(orgId, event, payload) {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-webhook-event': event
+    };
+    if (signature) headers['x-webhook-signature'] = signature;
+
         const res = await fetch(config.url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-webhook-signature': signature,
-            'x-webhook-event': event
-          },
+          headers,
           body: payloadStr
         });
 

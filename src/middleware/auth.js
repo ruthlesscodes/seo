@@ -1,8 +1,8 @@
-const { PUBLIC_PATHS, PLAN_LIMITS } = require('../utils/constants');
+const { isPublicPath, PLAN_LIMITS } = require('../utils/constants');
 const { prisma } = require('../utils/prisma');
 
 async function authMiddleware(request, reply) {
-  if (PUBLIC_PATHS.some(p => request.url.startsWith(p))) return;
+  if (isPublicPath(request.url)) return;
 
   const apiKey = request.headers['x-api-key']
     || (request.headers['authorization']?.startsWith('Bearer ')
@@ -30,6 +30,7 @@ async function authMiddleware(request, reply) {
     });
 
     if (!keyRecord || !keyRecord.isActive) {
+      await request.server.redis.del(cacheKey).catch(() => {});
       return reply.code(401).send({ error: 'invalid_api_key' });
     }
 
@@ -59,4 +60,10 @@ async function authMiddleware(request, reply) {
   request.planLimits = PLAN_LIMITS[org.plan] || PLAN_LIMITS.FREE;
 }
 
-module.exports = { authMiddleware };
+/** Invalidate cached auth for one API key (e.g. when key is deactivated). Call with redis + apiKey. */
+async function invalidateAuthCache(redis, apiKey) {
+  if (!redis || !apiKey) return;
+  await redis.del(`auth:${apiKey}`).catch(() => {});
+}
+
+module.exports = { authMiddleware, invalidateAuthCache };

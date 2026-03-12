@@ -19,4 +19,12 @@ const redisBullmq = new Redis(redisUrl, {
 
 redisBullmq.on('error', (err) => console.error('Redis (BullMQ) error:', err.message));
 
-module.exports = { redis, redisBullmq };
+/** Call before using redis in request handlers. Idempotent. */
+async function connectRedis() {
+  if (redis.status !== 'ready') await redis.connect();
+}
+async function connectRedisBullmq() {
+  if (redisBullmq.status !== 'ready') await redisBullmq.connect();
+}
+
+module.exports = { redis, redisBullmq, connectRedis, connectRedisBullmq };

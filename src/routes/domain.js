@@ -4,6 +4,17 @@ const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
 const schemas = require('../schemas/requests');
+const { validateUrlForScraping } = require('../utils/urlValidation');
+
+function escapeXml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 const DomainSitemapBody = z.object({
   url: z.string().url()
@@ -21,11 +32,12 @@ async function domainRoutes(fastify) {
   fastify.post('/map', async (request, reply) => {
     try {
       const body = schemas.DomainMapBody.parse(request.body);
+      const { url } = validateUrlForScraping(body.url);
 
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'domain.map');
       if (!allowed) return;
 
-      const result = await firecrawl.map(body.url, {
+      const result = await firecrawl.map(url, {
         search: body.search,
         limit: body.limit
       });
@@ -40,21 +52,12 @@ async function domainRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
       }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -66,15 +69,15 @@ async function domainRoutes(fastify) {
       if (!checkFeature(request, reply, 'sitemap')) return;
 
       const body = DomainSitemapBody.parse(request.body);
+      const { url: mapUrl } = validateUrlForScraping(body.url);
 
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'domain.sitemap');
       if (!allowed) return;
 
-      const mapUrl = body.url.startsWith('http') ? body.url : `https://${body.url}`;
-      const result = await firecrawl.map(mapUrl, { sitemap: 'include', limit: 10000 });
+      const result = await firecrawl.map(mapUrl, { sitemap: 'include', limit: 5000 });
       const urls = result.data?.links || result.links || result.data?.urls || [];
 
-      const urlEntries = urls.map(u => `  <url><loc>${u}</loc></url>`).join('\n');
+      const urlEntries = urls.map(u => `  <url><loc>${escapeXml(u)}</loc></url>`).join('\n');
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urlEntries}
@@ -88,21 +91,12 @@ ${urlEntries}
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
       }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -114,11 +108,11 @@ ${urlEntries}
       if (!checkFeature(request, reply, 'domain.structure')) return;
 
       const body = DomainStructureBody.parse(request.body);
+      const { url: mapUrl } = validateUrlForScraping(body.url);
 
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'domain.structure');
       if (!allowed) return;
 
-      const mapUrl = body.url.startsWith('http') ? body.url : `https://${body.url}`;
       const result = await firecrawl.map(mapUrl);
       const urls = result.data?.links || result.links || result.data?.urls || [];
 
@@ -150,21 +144,12 @@ ${urlEntries}
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        const e = new Error('URL not allowed or invalid.');
+        e.status = 400;
+        throw e;
       }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 }

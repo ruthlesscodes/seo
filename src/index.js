@@ -15,7 +15,7 @@ const { authMiddleware } = require('./middleware/auth');
 const { rateLimitMiddleware } = require('./middleware/rateLimit');
 const { usageMiddleware } = require('./middleware/usage');
 const { prisma } = require('./utils/prisma');
-const { redis } = require('./utils/redis');
+const { redis, redisBullmq, connectRedis, connectRedisBullmq } = require('./utils/redis');
 const { registerPluOrg } = require('./utils/bootstrap');
 
 let worker = null;
@@ -44,6 +44,28 @@ fastify.get('/', async (_request, reply) => {
 // ============================================
 fastify.register(cors, { origin: true });
 
+fastify.register(require('@fastify/swagger'), {
+  openapi: {
+    openapi: '3.0.0',
+    info: {
+      title: 'SEO Agent API',
+      version: '2.0.0',
+      description: 'API-first SEO intelligence platform. Firecrawl gives raw web data. We give SEO intelligence. Authenticate with x-api-key or Authorization: Bearer <key>.'
+    },
+    servers: [{ url: '/', description: 'API' }],
+    components: {
+      securitySchemes: {
+        apiKey: { type: 'apiKey', in: 'header', name: 'x-api-key', description: 'API key' }
+      }
+    },
+    security: [{ apiKey: [] }]
+  }
+});
+fastify.register(require('@fastify/swagger-ui'), {
+  routePrefix: '/docs',
+  uiConfig: { docExpansion: 'list', displayRequestDuration: true }
+});
+
 // ============================================
 // DECORATORS — make prisma + redis available to all routes
 // ============================================
@@ -56,6 +78,21 @@ fastify.decorate('redis', redis);
 fastify.addHook('onRequest', authMiddleware);
 fastify.addHook('onRequest', rateLimitMiddleware);
 fastify.addHook('onResponse', usageMiddleware);
+
+fastify.setErrorHandler((err, request, reply) => {
+  if (err.replySent === true || reply.sent) return;
+  request.log.error(err);
+  if (err.status === 400) {
+    return reply.code(400).send({ error: 'validation_error', message: err.message, details: err.details || err.errors });
+  }
+  if (err.status) {
+    return reply.code(err.status).send({ error: 'upstream_error', message: err.message, details: err.details });
+  }
+  if (err.name === 'ZodError') {
+    return reply.code(400).send({ error: 'validation_error', details: err.errors });
+  }
+  reply.code(500).send({ error: 'internal_error', message: 'Something went wrong.' });
+});
 
 // ============================================
 // STARTUP — load routes BEFORE listen (Fastify disallows register after boot)
@@ -70,14 +107,19 @@ async function connectDatabase() {
     ]);
     console.log('✅ Database connected');
 
+    await connectRedis();
     await Promise.race([
       redis.ping(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Redis connection timeout')), CONNECT_TIMEOUT))
     ]);
     console.log('✅ Redis connected');
 
-    const pluApiKey = await registerPluOrg(prisma);
-    console.log(`\n🔑 Plu API key: ${pluApiKey}\n`);
+    await connectRedisBullmq();
+    await redisBullmq.ping().catch(() => {});
+    console.log('✅ Redis (BullMQ) ready');
+
+    await registerPluOrg(prisma);
+    console.log('✅ Plu org ready');
 
     try {
       const { startScheduler } = require('./jobs/scheduler');
@@ -89,7 +131,8 @@ async function connectDatabase() {
       console.warn('⚠️ Background jobs failed to start:', e.message, e.stack);
     }
   } catch (err) {
-    fastify.log.warn({ err: err.message }, 'DB/Redis not available; server stays up (GET /health works)');
+    fastify.log.warn({ err: err.message }, 'DB/Redis not available');
+    throw err;
   }
 }
 
@@ -114,6 +157,8 @@ async function loadAllRoutes() {
 
 const start = async () => {
   try {
+    console.log('[boot] Connecting to database and Redis...');
+    await connectDatabase();
     console.log('[boot] Loading routes...');
     await loadAllRoutes();
     await fastify.ready();
@@ -122,9 +167,8 @@ const start = async () => {
     console.log('[start] Server listening — / and /health ready');
     console.log('[start] All routes loaded');
     console.log(`   GET  /health — status`);
-    console.log(`   GET  /docs   — API reference`);
+    console.log(`   GET  /docs   — OpenAPI UI`);
     console.log(`   POST /api/auth/register — get started\n`);
-    setImmediate(connectDatabase);
   } catch (err) {
     console.error('[start] Failed:', err);
     process.exit(1);

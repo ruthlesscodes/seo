@@ -143,10 +143,16 @@ const PUBLIC_PATHS = [
   '/',
   '/health',
   '/docs',
+  '/api-docs-simple',
   '/api/auth/register',
   '/api/auth/login',
   '/api/billing/webhook',
   '/api/auth/gsc/callback',
 ];
 
-module.exports = { PLAN_LIMITS, CREDIT_COSTS, PUBLIC_PATHS };
+/** Use exact match for '/' so every path does not bypass auth. */
+function isPublicPath(url) {
+  return PUBLIC_PATHS.some(p => (p === '/' ? url === '/' : url.startsWith(p)));
+}
+
+module.exports = { PLAN_LIMITS, CREDIT_COSTS, PUBLIC_PATHS, isPublicPath };

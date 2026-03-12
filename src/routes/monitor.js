@@ -1,10 +1,12 @@
 const { z } = require('zod');
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
+const { normalizeDomain } = require('../utils/domain');
 const firecrawl = require('../services/firecrawl');
 const { prisma } = require('../utils/prisma');
 const { deliverWebhook } = require('../utils/webhookDelivery');
 const schemas = require('../schemas/requests');
 const fcSchemas = require('../schemas/firecrawl');
+const { validateUrlForScraping } = require('../utils/urlValidation');
 
 const MonitorDiffBody = z.object({ url: z.string().url() });
 const MonitorDecayBody = z.object({
@@ -22,6 +24,7 @@ async function monitorRoutes(fastify) {
   fastify.post('/watch', async (request, reply) => {
     try {
       const body = schemas.MonitorWatchBody.parse(request.body);
+      const { url: validatedUrl } = validateUrlForScraping(body.url);
 
       const maxMonitored = request.planLimits?.maxMonitoredURLs ?? 3;
       const count = await prisma.monitoredUrl.count({ where: { orgId: request.org.id } });
@@ -39,10 +42,10 @@ async function monitorRoutes(fastify) {
       const freq = FREQ_MAP[body.frequency] || 'DAILY';
 
       const monitored = await prisma.monitoredUrl.upsert({
-        where: { orgId_url: { orgId: request.org.id, url: body.url } },
+        where: { orgId_url: { orgId: request.org.id, url: validatedUrl } },
         create: {
           orgId: request.org.id,
-          url: body.url,
+          url: validatedUrl,
           label: body.label,
           checkFrequency: freq
         },
@@ -58,6 +61,9 @@ async function monitorRoutes(fastify) {
       };
     } catch (err) {
       request.log.error(err);
+      if (err.message === 'url_not_allowed' || err.message === 'invalid_url' || err.message === 'url_required') {
+        return reply.code(400).send({ error: 'invalid_url', message: 'URL not allowed or invalid.' });
+      }
       if (err.name === 'ZodError') {
         return reply.code(400).send({ error: 'validation_error', details: err.errors });
       }
@@ -147,21 +153,7 @@ async function monitorRoutes(fastify) {
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -226,21 +218,7 @@ async function monitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -289,21 +267,7 @@ async function monitorRoutes(fastify) {
         meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 
@@ -323,7 +287,7 @@ async function monitorRoutes(fastify) {
       const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'monitor.decay', cost);
       if (!allowed) return;
 
-      const domainLower = body.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const domainNorm = normalizeDomain(body.domain);
       const decaying = [];
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
@@ -362,21 +326,7 @@ async function monitorRoutes(fastify) {
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
-      request.log.error(err);
-      if (err.status) {
-        return reply.code(err.status).send({
-          error: 'upstream_error',
-          message: err.message,
-          details: err.details
-        });
-      }
-      if (err.name === 'ZodError') {
-        return reply.code(400).send({ error: 'validation_error', details: err.errors });
-      }
-      return reply.code(500).send({
-        error: 'internal_error',
-        message: 'Something went wrong. Please try again.'
-      });
+      throw err;
     }
   });
 }

@@ -110,4 +110,4 @@ and SERP landscape into an actionable strategic brief. Return JSON: {
 }`
 };
 
-module.exports = { analyze, analyzeJSON, PROMPTS, client, MODEL };
+module.exports = { analyze, analyzeJSON, PROMPTS };

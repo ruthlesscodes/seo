@@ -214,4 +214,4 @@ function startScheduler(logger) {
   log.info('Scheduler started (hourly, daily [+agent audits +GSC alerts], weekly Fri 2AM, digest Mon 8AM, monthly)');
 }
 
-module.exports = { startScheduler, runMonitorChecks, runDecayCheck, runDailyAgentAudits, runWeeklyDigest };
+module.exports = { startScheduler, runMonitorChecks, runDecayCheck, runDailyAgentAudits };

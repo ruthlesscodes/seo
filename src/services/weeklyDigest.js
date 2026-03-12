@@ -11,18 +11,25 @@ const nodemailer = require('nodemailer');
 const { prisma } = require('../utils/prisma');
 const { PLAN_LIMITS } = require('../utils/constants');
 
-async function sendEmail({ to, subject, html, text }) {
+let _transporter = null;
+
+function getTransporter() {
   if (!process.env.SMTP_HOST) {
     throw new Error('SMTP not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.');
   }
+  if (!_transporter) {
+    _transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_PORT === '465',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+  }
+  return _transporter;
+}
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_PORT === '465',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
-
+async function sendEmail({ to, subject, html, text }) {
+  const transporter = getTransporter();
   return transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to,

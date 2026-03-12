@@ -1,4 +1,5 @@
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
+const { validateUrlForScraping } = require('../utils/urlValidation');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
@@ -20,22 +21,34 @@ async function geoRoutes(fastify) {
       const queries = body.queries && body.queries.length > 0
         ? body.queries
         : [`best ${body.brand}`, `top ${body.brand} for professionals`];
+      const toRun = queries.slice(0, 5);
+
+      const started = await Promise.all(
+        toRun.map((q) =>
+          firecrawl.agent(
+            `Search for "${q}" on Perplexity, Google AI Overviews, and ChatGPT. Check if "${body.brand}" is mentioned. Note which competitor brands are cited.`,
+            { model: 'spark-1-mini', maxCredits: 50 }
+          ).then((agentRes) => ({ query: q, agentId: agentRes.id || agentRes.data?.id }))
+        )
+      );
 
       const results = [];
-      for (const q of queries.slice(0, 5)) {
-        const agentRes = await firecrawl.agent(
-          `Search for "${q}" on Perplexity, Google AI Overviews, and ChatGPT. Check if "${body.brand}" is mentioned. Note which competitor brands are cited.`,
-          { model: 'spark-1-mini', maxCredits: 50 }
-        );
-        const agentId = agentRes.id || agentRes.data?.id;
-        for (let i = 0; i < 30; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          const status = await firecrawl.getAgentStatus(agentId);
-          if (status.status === 'completed' || status.data?.status === 'completed') {
-            results.push({ query: q, data: status.data || status.result });
-            break;
+      const pending = [...started];
+      for (let round = 0; round < 30 && pending.length > 0; round++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statuses = await Promise.all(pending.map((p) => firecrawl.getAgentStatus(p.agentId)));
+        const stillPending = [];
+        for (let i = 0; i < pending.length; i++) {
+          const s = statuses[i];
+          const st = s?.status || s?.data?.status;
+          if (st === 'completed') {
+            results.push({ query: pending[i].query, data: s.data || s.result });
+          } else if (st !== 'failed') {
+            stillPending.push(pending[i]);
           }
         }
+        pending.length = 0;
+        pending.push(...stillPending);
       }
 
       const analysis = await claude.analyzeJSON(
@@ -74,9 +87,11 @@ async function geoRoutes(fastify) {
 
       let urls = [];
       if (body.url) {
-        urls = [body.url];
+        const { url: safeUrl } = validateUrlForScraping(body.url);
+        urls = [safeUrl];
       } else {
         const mapUrl = body.domain.startsWith('http') ? body.domain : `https://${body.domain}`;
+        validateUrlForScraping(mapUrl);
         const mapRes = await firecrawl.map(mapUrl, { limit: body.maxPages });
         urls = (mapRes.data?.links || mapRes.links || []).slice(0, body.maxPages);
       }

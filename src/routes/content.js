@@ -1,4 +1,5 @@
 const { checkCredits, consumeCredits, checkFeature } = require('../utils/credits');
+const { validateUrlForScraping } = require('../utils/urlValidation');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { prisma } = require('../utils/prisma');
@@ -113,8 +114,9 @@ async function contentRoutes(fastify) {
       const { allowed, remaining, cost } = await checkCredits(request, reply, 'blog.refresh');
       if (!allowed) return;
 
+      const { url: safeUrl } = validateUrlForScraping(body.url);
       const [scrapeRes, searchRes] = await Promise.all([
-        firecrawl.scrape(body.url, { formats: ['markdown'] }),
+        firecrawl.scrape(safeUrl, { formats: ['markdown'] }),
         firecrawl.search(body.keyword, { limit: 5 })
       ]);
 

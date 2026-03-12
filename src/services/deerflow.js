@@ -21,10 +21,20 @@ const { deliverWebhook } = require('../utils/webhookDelivery');
 const DEERFLOW_URL = process.env.DEERFLOW_URL || 'http://localhost:2026';
 const DEERFLOW_GATEWAY = process.env.DEERFLOW_GATEWAY_URL || DEERFLOW_URL;
 
+const DEERFLOW_API_KEY = process.env.DEERFLOW_API_KEY;
+
+function deerflowHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (DEERFLOW_API_KEY) {
+    headers.Authorization = `Bearer ${DEERFLOW_API_KEY}`;
+  }
+  return headers;
+}
+
 async function deerflowRequest(endpoint, body) {
   const res = await fetch(`${DEERFLOW_GATEWAY}${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: deerflowHeaders(),
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(300_000),
   });

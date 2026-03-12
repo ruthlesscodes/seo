@@ -20,7 +20,7 @@ const RegisterBody = z.object({
 // ============================================
 const KeywordSearchBody = z.object({
   keywords: z.array(z.string().min(1)).min(1).max(200),
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   region: RegionCode.optional(),
   location: z.string().optional(),
   country: RegionCode.optional(),
@@ -40,7 +40,7 @@ const KeywordSuggestBody = z.object({
 // Competitors
 // ============================================
 const CompetitorCrawlBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   maxPages: z.number().int().min(1).max(200).default(50),
   includePaths: z.array(z.string()).optional()
 });
@@ -52,8 +52,8 @@ const CompetitorScrapeBody = z.object({
 
 const CompetitorCompareBody = z.object({
   keyword: z.string().min(1),
-  domain: z.string().min(3),
-  competitorDomain: z.string().min(3)
+  domain: z.string().min(3).max(253),
+  competitorDomain: z.string().min(3).max(253)
 });
 
 // ============================================
@@ -86,7 +86,7 @@ const ContentTrendingBody = z.object({
 // ============================================
 const RankCheckBody = z.object({
   keywords: z.array(z.string().min(1)).min(1).max(200),
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   region: RegionCode.optional(),
   country: RegionCode.optional(),
   location: z.string().optional()
@@ -94,7 +94,7 @@ const RankCheckBody = z.object({
 
 const RankGlobalBody = z.object({
   keyword: z.string().min(1),
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   regions: z.array(RegionCode).min(1).max(20)
 });
 
@@ -130,7 +130,7 @@ const AuditBatchBody = z.object({
 });
 
 const AuditInternalLinksBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   maxPages: z.number().int().min(10).max(200).default(100)
 });
 
@@ -150,12 +150,12 @@ const GeoReadabilityBody = z.object({
 }).refine(d => d.url || d.domain, { message: 'Provide url or domain' });
 
 const GeoLlmstxtBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   maxUrls: z.number().int().min(5).max(200).default(50)
 });
 
 const GeoOptimizeBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   brand: z.string().min(1),
   keywords: z.array(z.string().min(1)).min(1).max(20)
 });
@@ -164,14 +164,14 @@ const GeoOptimizeBody = z.object({
 // Intelligence
 // ============================================
 const IntelligenceAnalyzeBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   keywords: z.array(z.string().min(1)).min(1).max(50),
   competitors: z.array(z.string()).optional()
 });
 
 const IntelligenceGapsBody = z.object({
-  domain: z.string().min(3),
-  competitorDomain: z.string().min(3),
+  domain: z.string().min(3).max(253),
+  competitorDomain: z.string().min(3).max(253),
   keywords: z.array(z.string().min(1)).min(1).max(50)
 });
 
@@ -261,7 +261,7 @@ const RankSerpSnapshotBody = z.object({
 // Pipeline
 // ============================================
 const PipelineRunBody = z.object({
-  domain: z.string().min(3),
+  domain: z.string().min(3).max(253),
   keywords: z.array(z.string().min(1)).min(1).max(100),
   competitors: z.array(z.string()).optional(),
   region: RegionCode.default('US')

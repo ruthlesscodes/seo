@@ -12,6 +12,8 @@ const { normalizeDomain } = require('../utils/domain');
 const firecrawl = require('../services/firecrawl');
 const claude = require('../services/claude');
 const { deliverWebhook } = require('../utils/webhookDelivery');
+const { recordCreditsUsed } = require('../utils/credits');
+const { CREDIT_COSTS } = require('../utils/constants');
 
 const QUEUE_NAME = 'pipeline';
 
@@ -140,6 +142,9 @@ async function processPipelineJob(job) {
       where: { id: scrapeRunId },
       data: { status: 'COMPLETED', result, completedAt: new Date() }
     });
+
+    const pipelineCost = CREDIT_COSTS['pipeline.full'] || 50;
+    await recordCreditsUsed(orgId, 'pipeline.full', pipelineCost, '/api/pipeline/run');
 
     await deliverWebhook(scrapeRun.orgId, 'pipeline.completed', {
       jobId: scrapeRunId,

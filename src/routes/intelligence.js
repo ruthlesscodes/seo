@@ -63,7 +63,8 @@ async function intelligenceRoutes(fastify) {
   // POST /api/intelligence/gaps
   // Body: { domain: string, competitorDomain: string, keywords: string[] }
   fastify.post('/gaps', async (request, reply) => {
-    const body = schemas.IntelligenceGapsBody.parse(request.body);
+    try {
+      const body = schemas.IntelligenceGapsBody.parse(request.body);
 
       const cost = body.keywords.length;
       const { allowed, remaining, cost: creditCost } = await checkCredits(request, reply, 'intelligence.gaps', cost);
@@ -122,6 +123,9 @@ async function intelligenceRoutes(fastify) {
         data: analysis,
         meta: { creditsUsed: creditCost, creditsRemaining: remaining, plan: request.org.plan }
       };
+    } catch (err) {
+      throw err;
+    }
   });
 
   // POST /api/intelligence/agent — SCALE+
@@ -205,12 +209,11 @@ async function intelligenceRoutes(fastify) {
         }
       }
 
-      consumeCredits(request, 'intelligence.agent', cost);
-      return {
-        success: true,
-        data: { agentId, status: 'timeout' },
-        meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
-      };
+      return reply.code(504).send({
+        error: 'timeout',
+        message: 'Research job did not complete in time. No credits charged.',
+        agentId
+      });
     } catch (err) {
       throw err;
     }

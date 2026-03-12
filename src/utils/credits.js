@@ -51,6 +51,16 @@ function consumeCredits(request, operation, credits) {
 }
 
 /**
+ * Record credit consumption for an org (e.g. from a background job). Creates usage log entry.
+ * Use when the request is not available (e.g. pipeline worker).
+ */
+async function recordCreditsUsed(orgId, operation, credits, endpoint = 'background') {
+  await prisma.usageLog.create({
+    data: { orgId, operation, credits, endpoint }
+  });
+}
+
+/**
  * Check if org's plan includes a feature.
  */
 function checkFeature(request, reply, feature) {
@@ -65,4 +75,4 @@ function checkFeature(request, reply, feature) {
   return false;
 }
 
-module.exports = { checkCredits, consumeCredits, checkFeature };
+module.exports = { checkCredits, consumeCredits, recordCreditsUsed, checkFeature };

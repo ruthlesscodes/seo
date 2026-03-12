@@ -12,6 +12,8 @@ const schemas = require('../schemas/requests');
 const fcSchemas = require('../schemas/firecrawl');
 const { validateUrlForScraping } = require('../utils/urlValidation');
 
+const AUDIT_TECHNICAL_MAX_PAGES = Math.ceil(100 / 8);
+
 const AuditScreenshotBody = z.object({
   url: z.string().url(),
   fullPage: z.boolean().optional(),
@@ -105,7 +107,7 @@ async function auditRoutes(fastify) {
         },
       });
 
-      const urlsToAudit = urls.slice(0, Math.ceil(100 / 8));
+      const urlsToAudit = urls.slice(0, AUDIT_TECHNICAL_MAX_PAGES);
       const settled = await Promise.allSettled(
         urlsToAudit.map(async (url) => {
           const scrapeRes = await firecrawl.scrape(url, {

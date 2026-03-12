@@ -1,5 +1,5 @@
 const { Queue } = require('bullmq');
-const { checkCredits, consumeCredits } = require('../utils/credits');
+const { checkCredits } = require('../utils/credits');
 const { prisma } = require('../utils/prisma');
 const { redisBullmq } = require('../utils/redis');
 const schemas = require('../schemas/requests');
@@ -39,16 +39,14 @@ async function pipelineRoutes(fastify) {
 
       await getPipelineQueue().add('pipeline', { scrapeRunId: scrapeRun.id });
 
-      consumeCredits(request, 'pipeline.full', cost);
-
       return {
         success: true,
         data: {
           jobId: scrapeRun.id,
           status: 'PENDING',
-          message: 'Pipeline queued. Poll GET /api/pipeline/:jobId for status.'
+          message: 'Pipeline queued. Credits are charged when the job completes. Poll GET /api/pipeline/:jobId for status.'
         },
-        meta: { creditsUsed: cost, creditsRemaining: remaining, plan: request.org.plan }
+        meta: { creditsReserved: cost, creditsRemaining: remaining, plan: request.org.plan }
       };
     } catch (err) {
       throw err;

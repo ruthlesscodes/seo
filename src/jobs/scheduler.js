@@ -129,18 +129,25 @@ async function runDecayCheck() {
 }
 
 async function runDailyAgentAudits(log) {
-  if (!process.env.DEERFLOW_URL && !process.env.DEERFLOW_GATEWAY_URL) {
-    log.warn('Skipping daily agent audits: DEERFLOW_URL not configured');
-    return;
-  }
-
+  // Prefer new SEO Team (phased multi-agent) over legacy DeerFlow (parallel scanners)
   try {
-    const { runDailyAuditsForAllOrgs } = require('../services/deerflow');
-    log.info('Scheduler: starting daily DeerFlow agent audits');
-    const results = await runDailyAuditsForAllOrgs();
-    log.info({ results }, 'Scheduler: daily DeerFlow agent audits complete');
+    const { runDailyTeamAudits } = require('../services/seoTeam');
+    log.info('Scheduler: starting daily SEO Team audits (phased multi-agent)');
+    const results = await runDailyTeamAudits();
+    log.info({ results }, 'Scheduler: daily SEO Team audits complete');
   } catch (err) {
-    log.error({ err: err.message }, 'Scheduler: daily DeerFlow agent audits failed');
+    log.error({ err: err.message }, 'Scheduler: SEO Team audits failed, falling back to DeerFlow');
+
+    // Fallback to legacy DeerFlow if seoTeam fails
+    if (process.env.DEERFLOW_URL || process.env.DEERFLOW_GATEWAY_URL) {
+      try {
+        const { runDailyAuditsForAllOrgs } = require('../services/deerflow');
+        const results = await runDailyAuditsForAllOrgs();
+        log.info({ results }, 'Scheduler: DeerFlow fallback audits complete');
+      } catch (fallbackErr) {
+        log.error({ err: fallbackErr.message }, 'Scheduler: DeerFlow fallback also failed');
+      }
+    }
   }
 }
 

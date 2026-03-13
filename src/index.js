@@ -42,7 +42,14 @@ fastify.get('/', async (_request, reply) => {
 // ============================================
 // PLUGINS
 // ============================================
-fastify.register(cors, { origin: true });
+fastify.register(cors, {
+  origin: process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+    : process.env.DASHBOARD_URL
+      ? [process.env.DASHBOARD_URL]
+      : true,
+  credentials: true
+});
 
 fastify.register(require('@fastify/swagger'), {
   openapi: {

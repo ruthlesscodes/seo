@@ -43,6 +43,33 @@ async function billingRoutes(fastify) {
     return { plans: PLAN_LIMITS, creditCosts: CREDIT_COSTS };
   });
 
+  // GET /api/billing/portal — Stripe customer portal
+  fastify.get('/portal', async (request, reply) => {
+    if (!stripe) {
+      return reply.code(503).send({ error: 'billing_unavailable', message: 'Stripe not configured' });
+    }
+
+    const org = await prisma.organization.findUnique({
+      where: { id: request.org.id }
+    });
+
+    if (!org?.stripeCustomerId) {
+      return reply.code(400).send({
+        error: 'no_subscription',
+        message: 'No active subscription found. Please upgrade first.'
+      });
+    }
+
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: org.stripeCustomerId,
+      return_url: process.env.DASHBOARD_URL
+        ? `${process.env.DASHBOARD_URL}/dashboard/billing`
+        : `${process.env.APP_URL || 'https://app.seoagent.dev'}/dashboard/billing`
+    });
+
+    return { success: true, data: { portalUrl: portalSession.url } };
+  });
+
   // POST /api/billing/upgrade — Stripe checkout session
   fastify.post('/upgrade', async (request, reply) => {
     try {
@@ -80,8 +107,8 @@ async function billingRoutes(fastify) {
         customer: customerId,
         mode: 'subscription',
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: process.env.STRIPE_SUCCESS_URL || `${process.env.APP_URL || 'https://app.seoagent.dev'}/billing/success`,
-        cancel_url: process.env.STRIPE_CANCEL_URL || `${process.env.APP_URL || 'https://app.seoagent.dev'}/billing`,
+        success_url: process.env.STRIPE_SUCCESS_URL || `${process.env.DASHBOARD_URL || process.env.APP_URL || 'https://app.seoagent.dev'}/dashboard/billing?success=true`,
+        cancel_url: process.env.STRIPE_CANCEL_URL || `${process.env.DASHBOARD_URL || process.env.APP_URL || 'https://app.seoagent.dev'}/dashboard/billing`,
         metadata: { orgId: request.org.id, plan: body.plan }
       });
 

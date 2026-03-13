@@ -47,7 +47,7 @@ fastify.register(cors, {
     ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
     : process.env.DASHBOARD_URL
       ? [process.env.DASHBOARD_URL]
-      : true,
+      : false,
   credentials: true
 });
 

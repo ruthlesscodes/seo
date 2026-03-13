@@ -1,8 +1,51 @@
+# Dependencies
 node_modules/
+.pnp/
+.pnp.js
+
+# Build
+dist/
+build/
+output/
+
+# Environment
 .env
 .env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env.production
-dist/
-*.log
-.DS_Store
+
+# Prisma
 prisma/migrations/
+
+# Debug / Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Redis / BullMQ
+dump.rdb
+
+# Misc
+*.pem
+*.key
+*.cert
+tmp/
